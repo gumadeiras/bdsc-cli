@@ -8,6 +8,7 @@ from bdsc_cli.core import (
     build_fts_query,
     build_index,
     detect_query_kind,
+    iter_export_rows,
     get_status,
     get_stock,
     get_stock_by_rrid,
@@ -132,6 +133,17 @@ class CoreTests(unittest.TestCase):
         results = search_property(self.state_dir, "opto")
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["property_syns"], "opto")
+
+    def test_export_rows(self) -> None:
+        build_index(self.state_dir)
+        stocks = list(iter_export_rows(self.state_dir, "stocks", limit=1))
+        self.assertEqual(stocks[0]["rrid"], "RRID:BDSC_77118")
+        components = list(iter_export_rows(self.state_dir, "components", limit=1))
+        self.assertEqual(components[0]["property_syns"], "opto")
+        genes = list(iter_export_rows(self.state_dir, "genes", limit=1))
+        self.assertEqual(genes[0]["gene_relationships"], "coding")
+        properties = list(iter_export_rows(self.state_dir, "properties", limit=2))
+        self.assertEqual(properties[0]["prop_syn"], "opto")
 
 
 if __name__ == "__main__":

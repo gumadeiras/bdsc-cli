@@ -142,6 +142,7 @@ bdsc status --json
 bdsc search Chronos --jsonl
 bdsc gene FBgn0003996 --json
 bdsc lookup Chronos FBti0195688 --json
+bdsc export components --limit 5 --format jsonl
 bdsc stock 77118 --json
 ```
 
@@ -157,6 +158,7 @@ bdsc stock 77118 --json
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
 - `bdsc property <query>`: lookup by component property synonym/description
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
+- `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
 
@@ -184,6 +186,27 @@ bdsc lookup --kind component 'P{10XUAS-Chronos'
 bdsc lookup --kind property VALIUM20
 bdsc lookup --input queries.txt --json
 printf 'Chronos\nRRID:BDSC_77118\nFBti0195688\n' | bdsc lookup --input - --jsonl
+```
+
+## Export
+
+Use `export` when another tool wants direct normalized rows instead of
+search-oriented output.
+
+Datasets:
+
+- `stocks`
+- `components`
+- `genes`
+- `properties`
+
+Examples:
+
+```bash
+bdsc export stocks --limit 3
+bdsc export components --format tsv --output components.tsv
+bdsc export genes --format csv --output genes.csv
+bdsc export properties --limit 20 --format jsonl
 ```
 
 ## Notes

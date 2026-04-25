@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 from . import __version__
 from .core import (
     build_index,
+    EXPORT_DATASETS,
     format_component_results,
     format_gene_results,
     format_lookup_result,
@@ -17,6 +19,7 @@ from .core import (
     get_status,
     get_stock,
     get_stock_by_rrid,
+    iter_export_rows,
     live_search,
     LOOKUP_KINDS,
     lookup_query,
@@ -48,6 +51,23 @@ def build_parser() -> argparse.ArgumentParser:
         "build-index", help="rebuild the local SQLite index from downloaded CSVs"
     )
     build_parser_cmd.add_argument("--state-dir", help="cache/index directory")
+
+    export_parser = subparsers.add_parser(
+        "export", help="stream normalized rows for stocks/components/genes/properties"
+    )
+    export_parser.add_argument("dataset", choices=EXPORT_DATASETS)
+    export_parser.add_argument("--state-dir", help="cache/index directory")
+    export_parser.add_argument("--limit", type=int, help="max rows to emit")
+    export_parser.add_argument(
+        "--format",
+        choices=("jsonl", "csv", "tsv"),
+        default="jsonl",
+        help="output format",
+    )
+    export_parser.add_argument(
+        "--output",
+        help="output path; defaults to stdout",
+    )
 
     status_parser = subparsers.add_parser(
         "status", help="show local dataset/index status for the current state dir"
@@ -167,6 +187,35 @@ def load_queries(positional_queries: list[str], input_path: str | None) -> list[
     return queries
 
 
+def emit_export_rows(
+    rows,
+    *,
+    output_format: str,
+    output_path: str | None,
+) -> None:
+    if output_path:
+        handle = Path(output_path).open("w", encoding="utf-8", newline="")
+    else:
+        handle = sys.stdout
+
+    try:
+        if output_format == "jsonl":
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            return
+
+        writer = None
+        delimiter = "," if output_format == "csv" else "\t"
+        for row in rows:
+            if writer is None:
+                writer = csv.DictWriter(handle, fieldnames=list(row.keys()), delimiter=delimiter)
+                writer.writeheader()
+            writer.writerow(row)
+    finally:
+        if output_path:
+            handle.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -185,6 +234,18 @@ def main(argv: list[str] | None = None) -> int:
             state_dir = resolve_state_dir(args.state_dir)
             counts = build_index(state_dir)
             print(json.dumps({"indexed": counts, "state_dir": str(state_dir)}, indent=2))
+            return 0
+
+        if args.command == "export":
+            emit_export_rows(
+                iter_export_rows(
+                    resolve_state_dir(args.state_dir),
+                    args.dataset,
+                    limit=args.limit,
+                ),
+                output_format=args.format,
+                output_path=args.output,
+            )
             return 0
 
         if args.command == "status":

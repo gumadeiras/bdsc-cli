@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib import error, parse, request
 
 USER_AGENT = "bdsc-cli/0.1 (+https://bdsc.indiana.edu/)"
@@ -47,6 +47,7 @@ class GeneMatch:
 
 
 LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "property", "search")
+EXPORT_DATASETS = ("stocks", "components", "genes", "properties")
 
 
 def resolve_state_dir(value: str | Path | None) -> Path:
@@ -1044,6 +1045,121 @@ def get_status(state_dir: Path) -> dict[str, Any]:
         "index": index_info,
         "updated_at": manifest.get("updated_at"),
     }
+
+
+def iter_export_rows(
+    state_dir: Path,
+    dataset: str,
+    *,
+    limit: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    if dataset not in EXPORT_DATASETS:
+        raise ValueError(f"unsupported export dataset: {dataset}")
+
+    conn = _connect(state_dir)
+    try:
+        if dataset == "stocks":
+            sql = """
+                SELECT
+                  s.stknum,
+                  'RRID:BDSC_' || s.stknum AS rrid,
+                  s.genotype,
+                  s.chromosomes,
+                  s.aka,
+                  s.date_added,
+                  s.donor_info,
+                  s.stock_comments,
+                  COALESCE(sd.component_symbols, '') AS component_symbols,
+                  COALESCE(sd.gene_symbols, '') AS gene_symbols,
+                  COALESCE(sd.fbgns, '') AS fbgns
+                FROM stocks s
+                LEFT JOIN search_documents sd ON sd.stknum = s.stknum
+                ORDER BY s.stknum
+            """
+        elif dataset == "components":
+            sql = f"""
+                SELECT
+                  cc.stknum,
+                  cc.genotype,
+                  cc.component_symbol,
+                  cc.fbid,
+                  cc.mapstatement,
+                  cc.comment1,
+                  cc.comment2,
+                  cc.comment3,
+                  {_component_metadata_subqueries(
+                      "cc.stknum",
+                      "cc.component_symbol",
+                      "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
+                  )}
+                FROM component_comments cc
+                ORDER BY cc.stknum, cc.component_symbol
+            """
+        elif dataset == "genes":
+            sql = """
+                SELECT DISTINCT
+                  sg.stknum,
+                  sg.genotype,
+                  sg.component_symbol,
+                  cc.fbid,
+                  sg.gene_symbol,
+                  sg.fbgn,
+                  sg.bdsc_symbol_id,
+                  sg.bdsc_gene_id,
+                  COALESCE((
+                    SELECT group_concat(prop_syn, ' | ')
+                    FROM (
+                      SELECT DISTINCT cg.prop_syn AS prop_syn
+                      FROM compgenes cg
+                      WHERE cg.bdsc_symbol_id = sg.bdsc_symbol_id
+                        AND cg.bdsc_gene_id = sg.bdsc_gene_id
+                        AND cg.prop_syn != ''
+                      ORDER BY cg.prop_syn
+                    )
+                  ), '') AS gene_relationships
+                FROM stockgenes sg
+                LEFT JOIN component_comments cc
+                  ON cc.stknum = sg.stknum
+                 AND cc.component_symbol = sg.component_symbol
+                ORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol, sg.fbgn
+            """
+        else:
+            sql = """
+                SELECT DISTINCT
+                  cc.stknum,
+                  cc.genotype,
+                  cc.component_symbol,
+                  cc.fbid,
+                  cp.property_id,
+                  cp.prop_syn,
+                  cp.property_descrip
+                FROM component_comments cc
+                JOIN stockgenes sg
+                  ON sg.stknum = cc.stknum
+                 AND sg.component_symbol = cc.component_symbol
+                JOIN compprops cp
+                  ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+                ORDER BY cc.stknum, cc.component_symbol, cp.prop_syn, cp.property_id
+            """
+
+        if limit is not None:
+            sql += "\nLIMIT ?"
+            cursor = conn.execute(sql, (limit,))
+        else:
+            cursor = conn.execute(sql)
+
+        columns = [description[0] for description in cursor.description]
+        try:
+            while True:
+                rows = cursor.fetchmany(1000)
+                if not rows:
+                    break
+                for row in rows:
+                    yield dict(zip(columns, row, strict=False))
+        finally:
+            cursor.close()
+    finally:
+        conn.close()
 
 
 def format_sync_results(results: list[SyncResult]) -> str:
