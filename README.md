@@ -84,6 +84,8 @@ Search locally:
 
 ```bash
 bdsc search Chronos
+bdsc search Chronis
+bdsc search 'Or56a Lexa'
 bdsc search FBgn0003996 --json
 bdsc search Chronos --jsonl
 ```
@@ -297,6 +299,9 @@ bdsc terms property-descriptions --query optogenetic --jsonl
   `If-Modified-Since`) to avoid re-downloading unchanged files.
 - Local lookup is built from the public CSV dumps, not the private site search
   endpoints.
+- `search` now uses a two-stage index: exact/prefix FTS first, trigram fuzzy
+  fallback second. Typos and loose spacing/punctuation usually still find the
+  intended stock without having the exact BDSC string.
 - The live endpoint is undocumented and may change without notice.
 - BDSC data is large enough that the first full sync/index can take a few
   minutes depending on network and disk speed.

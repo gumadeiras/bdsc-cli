@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import hashlib
 import json
 import os
@@ -293,8 +294,11 @@ def build_index(state_dir: Path) -> dict[str, int]:
               donor_info TEXT,
               stock_comments TEXT,
               component_symbols TEXT,
+              fbids TEXT,
               gene_symbols TEXT,
               fbgns TEXT,
+              property_terms TEXT,
+              relationship_terms TEXT,
               search_text TEXT
             );
 
@@ -409,7 +413,8 @@ def build_index(state_dir: Path) -> dict[str, int]:
             """
             INSERT INTO search_documents (
               stknum, genotype, aka, donor_info, stock_comments,
-              component_symbols, gene_symbols, fbgns, search_text
+              component_symbols, fbids, gene_symbols, fbgns,
+              property_terms, relationship_terms, search_text
             )
             SELECT
               s.stknum,
@@ -424,6 +429,15 @@ def build_index(state_dir: Path) -> dict[str, int]:
                   FROM stockgenes sg
                   WHERE sg.stknum = s.stknum AND sg.component_symbol != ''
                   ORDER BY sg.component_symbol
+                )
+              ), ''),
+              COALESCE((
+                SELECT group_concat(fbid, ' ')
+                FROM (
+                  SELECT DISTINCT cc.fbid AS fbid
+                  FROM component_comments cc
+                  WHERE cc.stknum = s.stknum AND cc.fbid != ''
+                  ORDER BY cc.fbid
                 )
               ), ''),
               COALESCE((
@@ -444,12 +458,42 @@ def build_index(state_dir: Path) -> dict[str, int]:
                   ORDER BY sg.fbgn
                 )
               ), ''),
+              COALESCE((
+                SELECT group_concat(prop_syn, ' ')
+                FROM (
+                  SELECT DISTINCT cp.prop_syn AS prop_syn
+                  FROM stockgenes sg
+                  JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+                  WHERE sg.stknum = s.stknum AND cp.prop_syn != ''
+                  ORDER BY cp.prop_syn
+                )
+              ), ''),
+              COALESCE((
+                SELECT group_concat(prop_syn, ' ')
+                FROM (
+                  SELECT DISTINCT cg.prop_syn AS prop_syn
+                  FROM stockgenes sg
+                  JOIN compgenes cg
+                    ON cg.bdsc_symbol_id = sg.bdsc_symbol_id
+                   AND cg.bdsc_gene_id = sg.bdsc_gene_id
+                  WHERE sg.stknum = s.stknum AND cg.prop_syn != ''
+                  ORDER BY cg.prop_syn
+                )
+              ), ''),
               trim(
                 s.stknum || ' ' ||
                 COALESCE(s.genotype, '') || ' ' ||
                 COALESCE(s.aka, '') || ' ' ||
                 COALESCE(s.donor_info, '') || ' ' ||
                 COALESCE(s.stock_comments, '') || ' ' ||
+                COALESCE((
+                  SELECT group_concat(fbid, ' ')
+                  FROM (
+                    SELECT DISTINCT cc.fbid AS fbid
+                    FROM component_comments cc
+                    WHERE cc.stknum = s.stknum AND cc.fbid != ''
+                  )
+                ), '') || ' ' ||
                 COALESCE((
                   SELECT group_concat(component_symbol, ' ')
                   FROM (
@@ -473,6 +517,55 @@ def build_index(state_dir: Path) -> dict[str, int]:
                     FROM stockgenes sg
                     WHERE sg.stknum = s.stknum AND sg.fbgn != ''
                   )
+                ), '') || ' ' ||
+                COALESCE((
+                  SELECT group_concat(prop_syn, ' ')
+                  FROM (
+                    SELECT DISTINCT cp.prop_syn AS prop_syn
+                    FROM stockgenes sg
+                    JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+                    WHERE sg.stknum = s.stknum AND cp.prop_syn != ''
+                  )
+                ), '') || ' ' ||
+                COALESCE((
+                  SELECT group_concat(property_descrip, ' ')
+                  FROM (
+                    SELECT DISTINCT cp.property_descrip AS property_descrip
+                    FROM stockgenes sg
+                    JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+                    WHERE sg.stknum = s.stknum AND cp.property_descrip != ''
+                  )
+                ), '') || ' ' ||
+                COALESCE((
+                  SELECT group_concat(prop_syn, ' ')
+                  FROM (
+                    SELECT DISTINCT cg.prop_syn AS prop_syn
+                    FROM stockgenes sg
+                    JOIN compgenes cg
+                      ON cg.bdsc_symbol_id = sg.bdsc_symbol_id
+                     AND cg.bdsc_gene_id = sg.bdsc_gene_id
+                    WHERE sg.stknum = s.stknum AND cg.prop_syn != ''
+                  )
+                ), '') || ' ' ||
+                COALESCE((
+                  SELECT group_concat(comment_text, ' ')
+                  FROM (
+                    SELECT DISTINCT cc.comment1 AS comment_text
+                    FROM component_comments cc
+                    WHERE cc.stknum = s.stknum AND cc.comment1 != ''
+                    UNION
+                    SELECT DISTINCT cc.comment2 AS comment_text
+                    FROM component_comments cc
+                    WHERE cc.stknum = s.stknum AND cc.comment2 != ''
+                    UNION
+                    SELECT DISTINCT cc.comment3 AS comment_text
+                    FROM component_comments cc
+                    WHERE cc.stknum = s.stknum AND cc.comment3 != ''
+                    UNION
+                    SELECT DISTINCT cc.mapstatement AS comment_text
+                    FROM component_comments cc
+                    WHERE cc.stknum = s.stknum AND cc.mapstatement != ''
+                  )
                 ), '')
               )
             FROM stocks s
@@ -490,8 +583,11 @@ def build_index(state_dir: Path) -> dict[str, int]:
                   donor_info,
                   stock_comments,
                   component_symbols,
+                  fbids,
                   gene_symbols,
                   fbgns,
+                  property_terms,
+                  relationship_terms,
                   tokenize='porter unicode61'
                 )
                 """
@@ -504,11 +600,36 @@ def build_index(state_dir: Path) -> dict[str, int]:
                 """
                 INSERT INTO stock_fts (
                   stknum, genotype, aka, donor_info, stock_comments,
-                  component_symbols, gene_symbols, fbgns
+                  component_symbols, fbids, gene_symbols, fbgns,
+                  property_terms, relationship_terms
                 )
                 SELECT
                   stknum, genotype, aka, donor_info, stock_comments,
-                  component_symbols, gene_symbols, fbgns
+                  component_symbols, fbids, gene_symbols, fbgns,
+                  property_terms, relationship_terms
+                FROM search_documents
+                """
+            )
+
+        trigram_enabled = True
+        try:
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE stock_trigram USING fts5(
+                  stknum UNINDEXED,
+                  search_text,
+                  tokenize='trigram'
+                )
+                """
+            )
+        except sqlite3.OperationalError:
+            trigram_enabled = False
+
+        if trigram_enabled:
+            conn.execute(
+                """
+                INSERT INTO stock_trigram (stknum, search_text)
+                SELECT stknum, search_text
                 FROM search_documents
                 """
             )
@@ -521,6 +642,7 @@ def build_index(state_dir: Path) -> dict[str, int]:
             "compgenes": len(compgene_rows),
             "compprops": len(compprop_rows),
             "fts_enabled": int(fts_enabled),
+            "trigram_enabled": int(trigram_enabled),
         }
         manifest["index"] = {
             "db_path": str(db_path),
@@ -550,6 +672,213 @@ def build_fts_query(text: str) -> str:
     return " ".join(f"{token}*" for token in tokens)
 
 
+def _query_tokens(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z0-9]+", text.lower())
+
+
+def _compact_text(text: str) -> str:
+    return "".join(_query_tokens(text))
+
+
+def _trigrams(text: str) -> list[str]:
+    if len(text) < 3:
+        return []
+    return [text[index : index + 3] for index in range(len(text) - 2)]
+
+
+def build_trigram_query(text: str) -> str | None:
+    tokens = _query_tokens(text)
+    grams: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        for gram in _trigrams(token):
+            if gram not in seen:
+                seen.add(gram)
+                grams.append(gram)
+    compact = _compact_text(text)
+    for gram in _trigrams(compact):
+        if gram not in seen:
+            seen.add(gram)
+            grams.append(gram)
+    if not grams:
+        return None
+    return " OR ".join(f'"{gram}"' for gram in grams)
+
+
+def _trigram_overlap_ratio(query: str, text: str) -> float:
+    query_grams = set(_trigrams(_compact_text(query)))
+    text_grams = set(_trigrams(_compact_text(text)))
+    if not query_grams or not text_grams:
+        return 0.0
+    return len(query_grams & text_grams) / len(query_grams)
+
+
+def _best_term_similarity(query: str, text: str) -> float:
+    query_compact = _compact_text(query)
+    if not query_compact:
+        return 0.0
+
+    best = 0.0
+    for term in _query_tokens(text):
+        if len(term) < 3:
+            continue
+        similarity = difflib.SequenceMatcher(None, query_compact, term).ratio()
+        similarity += _trigram_overlap_ratio(query, term)
+        if similarity > best:
+            best = similarity
+    return best
+
+
+def _score_search_document(query: str, row: sqlite3.Row | dict[str, Any]) -> float:
+    query_value = query.strip().lower()
+    query_tokens = _query_tokens(query)
+    query_compact = _compact_text(query)
+    search_text = row["search_text"]
+    haystack = search_text.lower()
+    compact_haystack = _compact_text(search_text)
+    document_tokens = set(_query_tokens(search_text))
+
+    score = 0.0
+    if query_value and query_value in haystack:
+        score += 8.0
+    if query_compact and query_compact in compact_haystack:
+        score += 10.0
+
+    exact_matches = sum(1 for token in query_tokens if token in document_tokens)
+    prefix_matches = sum(
+        1
+        for token in query_tokens
+        if token not in document_tokens and any(doc.startswith(token) for doc in document_tokens)
+    )
+    score += exact_matches * 3.0
+    score += prefix_matches * 1.5
+
+    overlap = _trigram_overlap_ratio(query, search_text)
+    score += overlap * 4.0
+
+    gene_symbols = row["gene_symbols"] or ""
+    component_symbols = row["component_symbols"] or ""
+    primary_fields = f"{gene_symbols} {component_symbols}".strip()
+    if primary_fields:
+        score += _trigram_overlap_ratio(query, primary_fields) * 8.0
+        score += _best_term_similarity(query, primary_fields) * 12.0
+
+    return score
+
+
+def _search_result_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stknum": row["stknum"],
+        "genotype": row["genotype"],
+        "gene_symbols": row["gene_symbols"],
+        "fbgns": row["fbgns"],
+        "component_symbols": row["component_symbols"],
+    }
+
+
+def _search_candidates_from_prefix_fts(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    has_fts = bool(
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_fts'"
+        ).fetchone()
+    )
+    if not has_fts:
+        rows = conn.execute(
+            """
+            SELECT
+              s.stknum,
+              s.genotype,
+              sd.gene_symbols,
+              sd.fbgns,
+              sd.component_symbols,
+              sd.search_text
+            FROM search_documents sd
+            JOIN stocks s ON s.stknum = sd.stknum
+            WHERE sd.search_text LIKE ?
+            ORDER BY s.stknum
+            LIMIT ?
+            """,
+            (f"%{query}%", limit),
+        ).fetchall()
+        return [{"row": row, "score": _score_search_document(query, row) + 20.0} for row in rows]
+
+    rows = conn.execute(
+        """
+        SELECT
+          s.stknum,
+          s.genotype,
+          sd.gene_symbols,
+          sd.fbgns,
+          sd.component_symbols,
+          sd.search_text,
+          bm25(stock_fts) AS rank
+        FROM stock_fts f
+        JOIN stocks s ON s.stknum = f.stknum
+        JOIN search_documents sd ON sd.stknum = s.stknum
+        WHERE stock_fts MATCH ?
+        ORDER BY bm25(stock_fts), s.stknum
+        LIMIT ?
+        """,
+        (build_fts_query(query), limit),
+    ).fetchall()
+    return [
+        {
+            "row": row,
+            "score": _score_search_document(query, row) + 40.0 + min(10.0, abs(row["rank"]) * 1000000.0),
+        }
+        for row in rows
+    ]
+
+
+def _search_candidates_from_trigram_fts(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    trigram_query = build_trigram_query(query)
+    if not trigram_query:
+        return []
+
+    has_trigram = bool(
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_trigram'"
+        ).fetchone()
+    )
+    if not has_trigram:
+        return []
+
+    rows = conn.execute(
+        """
+        SELECT
+          s.stknum,
+          s.genotype,
+          sd.gene_symbols,
+          sd.fbgns,
+          sd.component_symbols,
+          sd.search_text,
+          bm25(stock_trigram) AS rank
+        FROM stock_trigram t
+        JOIN stocks s ON s.stknum = t.stknum
+        JOIN search_documents sd ON sd.stknum = s.stknum
+        WHERE stock_trigram MATCH ?
+        ORDER BY bm25(stock_trigram), s.stknum
+        LIMIT ?
+        """,
+        (trigram_query, limit),
+    ).fetchall()
+
+    matches: list[dict[str, Any]] = []
+    for row in rows:
+        score = _score_search_document(query, row) + min(6.0, abs(row["rank"]) * 1000000.0)
+        if score >= 4.5:
+            matches.append({"row": row, "score": score})
+    return matches
+
+
 def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
@@ -561,50 +890,25 @@ def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str,
             stock = get_stock(state_dir, int(query))
             return [stock] if stock else []
 
-        has_fts = bool(
-            conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_fts'"
-            ).fetchone()
+        candidates: dict[int, dict[str, Any]] = {}
+        for match in _search_candidates_from_prefix_fts(conn, query, max(limit * 3, 20)):
+            stknum = match["row"]["stknum"]
+            existing = candidates.get(stknum)
+            if existing is None or match["score"] > existing["score"]:
+                candidates[stknum] = match
+
+        if not candidates:
+            for match in _search_candidates_from_trigram_fts(conn, query, max(limit * 12, 60)):
+                stknum = match["row"]["stknum"]
+                existing = candidates.get(stknum)
+                if existing is None or match["score"] > existing["score"]:
+                    candidates[stknum] = match
+
+        ranked = sorted(
+            candidates.values(),
+            key=lambda item: (-item["score"], item["row"]["stknum"]),
         )
-        rows: list[sqlite3.Row]
-
-        if has_fts:
-            rows = conn.execute(
-                """
-                SELECT
-                  s.stknum,
-                  s.genotype,
-                  sd.gene_symbols,
-                  sd.fbgns,
-                  sd.component_symbols
-                FROM stock_fts f
-                JOIN stocks s ON s.stknum = f.stknum
-                JOIN search_documents sd ON sd.stknum = s.stknum
-                WHERE stock_fts MATCH ?
-                ORDER BY bm25(stock_fts), s.stknum
-                LIMIT ?
-                """,
-                (build_fts_query(query), limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT
-                  s.stknum,
-                  s.genotype,
-                  sd.gene_symbols,
-                  sd.fbgns,
-                  sd.component_symbols
-                FROM search_documents sd
-                JOIN stocks s ON s.stknum = sd.stknum
-                WHERE sd.search_text LIKE ?
-                ORDER BY s.stknum
-                LIMIT ?
-                """,
-                (f"%{query}%", limit),
-            ).fetchall()
-
-        return [dict(row) for row in rows]
+        return [_search_result_payload(item["row"]) for item in ranked[:limit]]
     finally:
         conn.close()
 
@@ -1331,6 +1635,11 @@ def get_status(state_dir: Path) -> dict[str, Any]:
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_fts'"
                 ).fetchone()
             )
+            has_trigram = bool(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_trigram'"
+                ).fetchone()
+            )
             index_info = {
                 "db_path": str(db_path),
                 "built_at": None,
@@ -1343,6 +1652,7 @@ def get_status(state_dir: Path) -> dict[str, Any]:
                     "compgenes": conn.execute("SELECT COUNT(*) FROM compgenes").fetchone()[0],
                     "compprops": conn.execute("SELECT COUNT(*) FROM compprops").fetchone()[0],
                     "fts_enabled": int(has_fts),
+                    "trigram_enabled": int(has_trigram),
                 },
             }
         finally:

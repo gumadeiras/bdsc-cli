@@ -9,6 +9,7 @@ from pathlib import Path
 from bdsc_cli.cli import main
 from bdsc_cli.core import (
     build_fts_query,
+    build_trigram_query,
     build_index,
     detect_query_kind,
     iter_export_rows,
@@ -88,12 +89,19 @@ class CoreTests(unittest.TestCase):
     def test_build_fts_query_tokenizes_text(self) -> None:
         self.assertEqual(build_fts_query("10XUAS-Chronos"), "10xuas* chronos*")
 
+    def test_build_trigram_query_quotes_ngrams(self) -> None:
+        self.assertEqual(build_trigram_query("Chronis"), '"chr" OR "hro" OR "ron" OR "oni" OR "nis"')
+
     def test_build_index_and_search(self) -> None:
         counts = build_index(self.state_dir)
         self.assertEqual(counts["stocks"], 4)
         results = search_local(self.state_dir, "Chronos")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["stknum"], 77118)
+        fuzzy_typo = search_local(self.state_dir, "Chronis")
+        self.assertEqual(fuzzy_typo[0]["stknum"], 77118)
+        fuzzy_spacing = search_local(self.state_dir, "Or56a Lexa")
+        self.assertEqual(fuzzy_spacing[0]["stknum"], 605642)
 
     def test_get_stock_details(self) -> None:
         build_index(self.state_dir)
@@ -145,6 +153,9 @@ class CoreTests(unittest.TestCase):
         fallback = lookup_query(self.state_dir, "optogenetic")
         self.assertEqual(fallback["kind"], "search")
         self.assertEqual(fallback["results"][0]["stknum"], 77118)
+        typo_fallback = lookup_query(self.state_dir, "Chronis")
+        self.assertEqual(typo_fallback["kind"], "search")
+        self.assertEqual(typo_fallback["results"][0]["stknum"], 77118)
 
     def test_property_search(self) -> None:
         build_index(self.state_dir)
