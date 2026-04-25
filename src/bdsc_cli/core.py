@@ -776,6 +776,22 @@ def _search_result_payload(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _merge_ranked_matches(
+    matches: list[dict[str, Any]],
+    key_fn,
+) -> list[dict[str, Any]]:
+    merged: dict[Any, dict[str, Any]] = {}
+    for match in matches:
+        key = key_fn(match["row"])
+        existing = merged.get(key)
+        if existing is None or match["score"] > existing["score"]:
+            merged[key] = match
+    return sorted(
+        merged.values(),
+        key=lambda item: (-item["score"], item["row"]["stknum"]),
+    )
+
+
 def _search_candidates_from_prefix_fts(
     conn: sqlite3.Connection,
     query: str,
@@ -879,6 +895,77 @@ def _search_candidates_from_trigram_fts(
     return matches
 
 
+def _candidate_stock_ids_for_query(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+) -> list[int]:
+    candidates: dict[int, float] = {}
+    for match in _search_candidates_from_prefix_fts(conn, query, max(limit * 2, 20)):
+        candidates[match["row"]["stknum"]] = max(
+            match["score"],
+            candidates.get(match["row"]["stknum"], float("-inf")),
+        )
+    for match in _search_candidates_from_trigram_fts(conn, query, max(limit * 6, 60)):
+        candidates[match["row"]["stknum"]] = max(
+            match["score"],
+            candidates.get(match["row"]["stknum"], float("-inf")),
+        )
+    ranked = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
+    return [stknum for stknum, _ in ranked[:limit]]
+
+
+def _score_field_match(query: str, text: str) -> float:
+    if not text:
+        return 0.0
+    lowered_query = query.strip().lower()
+    compact_query = _compact_text(query)
+    lowered_text = text.lower()
+    compact_text = _compact_text(text)
+    text_tokens = set(_query_tokens(text))
+    query_tokens = _query_tokens(query)
+
+    score = 0.0
+    if lowered_query and lowered_query == lowered_text:
+        score += 12.0
+    elif lowered_query and lowered_query in lowered_text:
+        score += 8.0
+    if compact_query and compact_query == compact_text:
+        score += 14.0
+    elif compact_query and compact_query in compact_text:
+        score += 10.0
+    score += _trigram_overlap_ratio(query, text) * 6.0
+    score += _best_term_similarity(query, text) * 8.0
+    score += sum(1 for token in query_tokens if token in text_tokens) * 1.5
+    score += sum(
+        1
+        for token in query_tokens
+        if token not in text_tokens and any(text_token.startswith(token) for text_token in text_tokens)
+    )
+    return score
+
+
+def _rank_direct_rows(
+    query: str,
+    rows: list[sqlite3.Row],
+    *,
+    field_names: list[str],
+    limit: int,
+    min_score: float = 5.0,
+    key_fn=None,
+) -> list[dict[str, Any]]:
+    scored: list[dict[str, Any]] = []
+    for row in rows:
+        row_score = max(_score_field_match(query, row[field_name] or "") for field_name in field_names)
+        if row_score >= min_score:
+            scored.append({"row": row, "score": row_score})
+
+    if key_fn is None:
+        key_fn = lambda row: tuple(row[key] for key in row.keys())
+    ranked = _merge_ranked_matches(scored, key_fn)
+    return [dict(item["row"]) for item in ranked[:limit]]
+
+
 def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
@@ -957,7 +1044,38 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
                 """,
                 (query, f"{query}%", query, limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+        if rows:
+            return [dict(row) for row in rows]
+
+        stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+        if not stock_ids:
+            return []
+        placeholders = ", ".join("?" for _ in stock_ids)
+        fuzzy_rows = conn.execute(
+            f"""
+            SELECT DISTINCT
+              sg.stknum,
+              sg.genotype,
+              sg.component_symbol,
+              sg.gene_symbol,
+              sg.fbgn
+            FROM stockgenes sg
+            WHERE sg.stknum IN ({placeholders})
+            """,
+            stock_ids,
+        ).fetchall()
+        return _rank_direct_rows(
+            query,
+            fuzzy_rows,
+            field_names=["gene_symbol", "fbgn"],
+            limit=limit,
+            key_fn=lambda row: (
+                row["stknum"],
+                row["component_symbol"],
+                row["gene_symbol"],
+                row["fbgn"],
+            ),
+        )
     finally:
         conn.close()
 
@@ -1026,6 +1144,7 @@ def _component_metadata_subqueries(
 def _search_component_table(
     state_dir: Path,
     *,
+    conn: sqlite3.Connection | None = None,
     column: str,
     query: str,
     limit: int,
@@ -1037,7 +1156,8 @@ def _search_component_table(
     if column not in {"fbid", "component_symbol"}:
         raise ValueError(f"unsupported component search column: {column}")
 
-    conn = _connect(state_dir)
+    close_conn = conn is None
+    conn = conn or _connect(state_dir)
     try:
         rows = conn.execute(
             f"""
@@ -1063,9 +1183,113 @@ def _search_component_table(
             """,
             (query, f"{query}%", query, limit),
         ).fetchall()
-        return [dict(row) for row in rows]
+        if rows:
+            return [dict(row) for row in rows]
+
+        stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+        if not stock_ids:
+            return []
+        placeholders = ", ".join("?" for _ in stock_ids)
+        fuzzy_rows = conn.execute(
+            f"""
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              {_component_metadata_subqueries(
+                  "cc.stknum",
+                  "cc.component_symbol",
+                  "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
+              )}
+            FROM component_comments cc
+            WHERE cc.stknum IN ({placeholders})
+            """,
+            stock_ids,
+        ).fetchall()
+        field_names = ["fbid", "component_symbol", "gene_symbols", "genotype", "property_syns"]
+        if column == "component_symbol":
+            field_names = ["component_symbol", "gene_symbols", "fbid", "property_syns", "genotype"]
+        return _rank_direct_rows(
+            query,
+            fuzzy_rows,
+            field_names=field_names,
+            limit=limit,
+            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
+        )
     finally:
-        conn.close()
+        if close_conn:
+            conn.close()
+
+
+def _fetch_component_domain_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+    *,
+    cte_sql: str,
+    cte_params: list[Any],
+) -> list[sqlite3.Row]:
+    rows = conn.execute(
+        f"""
+        {cte_sql}
+        SELECT
+          cc.stknum,
+          cc.genotype,
+          cc.component_symbol,
+          cc.fbid,
+          cc.mapstatement,
+          {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
+        FROM component_comments cc
+        JOIN stockgenes sg0
+          ON sg0.stknum = cc.stknum
+         AND sg0.component_symbol = cc.component_symbol
+        JOIN matching_rows mr
+          ON mr.bdsc_symbol_id = sg0.bdsc_symbol_id
+        GROUP BY
+          cc.stknum,
+          cc.genotype,
+          cc.component_symbol,
+          cc.fbid,
+          cc.mapstatement,
+          sg0.bdsc_symbol_id
+        ORDER BY cc.stknum, cc.component_symbol
+        LIMIT ?
+        """,
+        (*cte_params, limit),
+    ).fetchall()
+    if rows:
+        return rows
+
+    stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+    if not stock_ids:
+        return []
+    placeholders = ", ".join("?" for _ in stock_ids)
+    return conn.execute(
+        f"""
+        SELECT
+          cc.stknum,
+          cc.genotype,
+          cc.component_symbol,
+          cc.fbid,
+          cc.mapstatement,
+          {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
+        FROM component_comments cc
+        JOIN stockgenes sg0
+          ON sg0.stknum = cc.stknum
+         AND sg0.component_symbol = cc.component_symbol
+        WHERE cc.stknum IN ({placeholders})
+        GROUP BY
+          cc.stknum,
+          cc.genotype,
+          cc.component_symbol,
+          cc.fbid,
+          cc.mapstatement,
+          sg0.bdsc_symbol_id
+        """,
+        stock_ids,
+    ).fetchall()
 
 
 def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -1075,41 +1299,28 @@ def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[s
 
     conn = _connect(state_dir)
     try:
-        rows = conn.execute(
-            f"""
-            WITH matching_props AS (
+        rows = _fetch_component_domain_rows(
+            conn,
+            query,
+            limit,
+            cte_sql="""
+            WITH matching_rows AS (
               SELECT DISTINCT bdsc_symbol_id
               FROM compprops
               WHERE LOWER(prop_syn) = LOWER(?)
                  OR LOWER(prop_syn) LIKE LOWER(?)
                  OR LOWER(property_descrip) LIKE LOWER(?)
             )
-            SELECT
-              cc.stknum,
-              cc.genotype,
-              cc.component_symbol,
-              cc.fbid,
-              cc.mapstatement,
-              {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
-            FROM component_comments cc
-            JOIN stockgenes sg0
-              ON sg0.stknum = cc.stknum
-             AND sg0.component_symbol = cc.component_symbol
-            JOIN matching_props mp
-              ON mp.bdsc_symbol_id = sg0.bdsc_symbol_id
-            GROUP BY
-              cc.stknum,
-              cc.genotype,
-              cc.component_symbol,
-              cc.fbid,
-              cc.mapstatement,
-              sg0.bdsc_symbol_id
-            ORDER BY cc.stknum, cc.component_symbol
-            LIMIT ?
             """,
-            (query, f"{query}%", f"%{query}%", limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+            cte_params=[query, f"{query}%", f"%{query}%"],
+        )
+        return _rank_direct_rows(
+            query,
+            rows,
+            field_names=["property_syns", "property_descriptions", "component_symbol", "gene_symbols"],
+            limit=limit,
+            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
+        )
     finally:
         conn.close()
 
@@ -1121,40 +1332,27 @@ def search_relationship(state_dir: Path, query: str, limit: int = 20) -> list[di
 
     conn = _connect(state_dir)
     try:
-        rows = conn.execute(
-            f"""
-            WITH matching_relationships AS (
+        rows = _fetch_component_domain_rows(
+            conn,
+            query,
+            limit,
+            cte_sql="""
+            WITH matching_rows AS (
               SELECT DISTINCT bdsc_symbol_id
               FROM compgenes
               WHERE LOWER(prop_syn) = LOWER(?)
                  OR LOWER(prop_syn) LIKE LOWER(?)
             )
-            SELECT
-              cc.stknum,
-              cc.genotype,
-              cc.component_symbol,
-              cc.fbid,
-              cc.mapstatement,
-              {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
-            FROM component_comments cc
-            JOIN stockgenes sg0
-              ON sg0.stknum = cc.stknum
-             AND sg0.component_symbol = cc.component_symbol
-            JOIN matching_relationships mr
-              ON mr.bdsc_symbol_id = sg0.bdsc_symbol_id
-            GROUP BY
-              cc.stknum,
-              cc.genotype,
-              cc.component_symbol,
-              cc.fbid,
-              cc.mapstatement,
-              sg0.bdsc_symbol_id
-            ORDER BY cc.stknum, cc.component_symbol
-            LIMIT ?
             """,
-            (query, f"{query}%", limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+            cte_params=[query, f"{query}%"],
+        )
+        return _rank_direct_rows(
+            query,
+            rows,
+            field_names=["gene_relationships", "gene_symbols", "component_symbol", "property_syns"],
+            limit=limit,
+            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
+        )
     finally:
         conn.close()
 

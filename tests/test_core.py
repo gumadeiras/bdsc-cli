@@ -115,6 +115,8 @@ class CoreTests(unittest.TestCase):
         results = search_gene(self.state_dir, "Chronos")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["fbgn"], "FBgn0000001")
+        fuzzy_results = search_gene(self.state_dir, "Chronis")
+        self.assertEqual(fuzzy_results[0]["gene_symbol"], "Chronos")
         status = get_status(self.state_dir)
         self.assertTrue(status["db_exists"])
         self.assertEqual(status["index"]["counts"]["stocks"], 4)
@@ -126,9 +128,13 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(component_results[0]["fbid"], "FBti0195688")
         self.assertEqual(component_results[0]["property_syns"], "opto")
         self.assertEqual(component_results[0]["gene_relationships"], "coding")
+        fuzzy_component_results = search_component(self.state_dir, "Or56a Lexa")
+        self.assertEqual(fuzzy_component_results[0]["stknum"], 605642)
         fbid_results = search_fbid(self.state_dir, "FBti0195688")
         self.assertEqual(len(fbid_results), 1)
         self.assertEqual(fbid_results[0]["stknum"], 77118)
+        fuzzy_fbid_results = search_fbid(self.state_dir, "60564")
+        self.assertEqual(fuzzy_fbid_results[0]["fbid"], "FBti605642")
         stock = get_stock_by_rrid(self.state_dir, "RRID:BDSC_77118")
         assert stock is not None
         self.assertEqual(stock["stknum"], 77118)
@@ -154,20 +160,24 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(fallback["kind"], "search")
         self.assertEqual(fallback["results"][0]["stknum"], 77118)
         typo_fallback = lookup_query(self.state_dir, "Chronis")
-        self.assertEqual(typo_fallback["kind"], "search")
-        self.assertEqual(typo_fallback["results"][0]["stknum"], 77118)
+        self.assertEqual(typo_fallback["kind"], "gene")
+        self.assertEqual(typo_fallback["results"][0]["gene_symbol"], "Chronos")
 
     def test_property_search(self) -> None:
         build_index(self.state_dir)
         results = search_property(self.state_dir, "opto")
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["property_syns"], "opto")
+        fuzzy_results = search_property(self.state_dir, "optogen")
+        self.assertEqual(fuzzy_results[0]["property_descriptions"], "optogenetic")
 
     def test_relationship_search(self) -> None:
         build_index(self.state_dir)
         results = search_relationship(self.state_dir, "coding")
         self.assertEqual(len(results), 4)
         self.assertEqual(results[0]["gene_relationships"], "coding")
+        fuzzy_results = search_relationship(self.state_dir, "codng")
+        self.assertEqual(fuzzy_results[0]["gene_relationships"], "coding")
 
     def test_export_rows(self) -> None:
         build_index(self.state_dir)

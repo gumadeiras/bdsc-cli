@@ -107,6 +107,7 @@ Query by gene symbol or FBgn:
 
 ```bash
 bdsc gene Chronos
+bdsc gene Chronis
 bdsc gene FBgn0003996 --json
 ```
 
@@ -114,6 +115,7 @@ Query by component symbol, FlyBase component id, or RRID:
 
 ```bash
 bdsc component 'P{10XUAS-Chronos'
+bdsc component 'Or56a Lexa'
 bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
 ```
@@ -122,6 +124,7 @@ Query by component property:
 
 ```bash
 bdsc property VALIUM20
+bdsc property optogen
 bdsc property 'guide RNA'
 ```
 
@@ -129,6 +132,7 @@ Query by component-gene relationship:
 
 ```bash
 bdsc relationship RNAi
+bdsc relationship codng
 bdsc relationship coding
 ```
 
@@ -171,12 +175,12 @@ bdsc stock 77118 --json
 - `bdsc build-index`: rebuild the SQLite index from previously downloaded CSVs
 - `bdsc status`: show local dataset freshness and index metadata
 - `bdsc search <query>`: local full-text search
-- `bdsc gene <query>`: exact/prefix lookup by gene symbol or FBgn
-- `bdsc component <query>`: exact/prefix lookup by component symbol
+- `bdsc gene <query>`: exact/fuzzy lookup by gene symbol or FBgn
+- `bdsc component <query>`: exact/fuzzy lookup by component symbol
 - `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
-- `bdsc property <query>`: lookup by component property synonym/description
-- `bdsc relationship <query>`: lookup by component-gene relationship label
+- `bdsc property <query>`: exact/fuzzy lookup by component property synonym/description
+- `bdsc relationship <query>`: exact/fuzzy lookup by component-gene relationship label
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc filter`: compound AND filters across normalized datasets
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
@@ -302,6 +306,8 @@ bdsc terms property-descriptions --query optogenetic --jsonl
 - `search` now uses a two-stage index: exact/prefix FTS first, trigram fuzzy
   fallback second. Typos and loose spacing/punctuation usually still find the
   intended stock without having the exact BDSC string.
+- direct query commands (`gene`, `component`, `property`, `relationship`) also
+  rerank fuzzy candidates when exact/prefix matching misses.
 - The live endpoint is undocumented and may change without notice.
 - BDSC data is large enough that the first full sync/index can take a few
   minutes depending on network and disk speed.
