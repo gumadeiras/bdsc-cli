@@ -56,6 +56,7 @@ Then query it:
 ```bash
 bdsc search Chronos
 bdsc gene Chronos
+bdsc filter --gene Or56a --property lexA
 bdsc component 'P{10XUAS-Chronos'
 bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
@@ -129,6 +130,14 @@ bdsc relationship RNAi
 bdsc relationship coding
 ```
 
+Use compound AND filters when one field is not enough:
+
+```bash
+bdsc filter --gene Or56a --property lexA
+bdsc filter --gene Or67d --property qf --json
+bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
+```
+
 Inspect cache/index status:
 
 ```bash
@@ -149,6 +158,7 @@ bdsc status --json
 bdsc search Chronos --jsonl
 bdsc gene FBgn0003996 --json
 bdsc lookup Chronos FBti0195688 --json
+bdsc filter --gene Or56a --property lexA --json
 bdsc export components --limit 5 --format jsonl
 bdsc stock 77118 --json
 ```
@@ -166,6 +176,7 @@ bdsc stock 77118 --json
 - `bdsc property <query>`: lookup by component property synonym/description
 - `bdsc relationship <query>`: lookup by component-gene relationship label
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
+- `bdsc filter`: compound AND filters across normalized datasets
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
 - `bdsc terms <scope>`: inspect available property/relationship vocab
 - `bdsc stock <stknum>`: local stock details
@@ -216,6 +227,8 @@ bdsc export stocks --limit 3
 bdsc export genes --query Chronos --kind gene
 bdsc export components --query FBti0195688 --kind fbid --format jsonl
 bdsc export properties --query VALIUM20 --kind property --format tsv
+bdsc export components --gene Or56a --property lexA --format jsonl
+bdsc export genes --property olfactory --relationship coding --format csv
 bdsc export components --format tsv --output components.tsv
 bdsc export genes --format csv --output genes.csv
 bdsc export properties --limit 20 --format jsonl
@@ -232,6 +245,32 @@ bdsc export properties --limit 20 --format jsonl
 - `relationship`
 - `search`
 - `auto`
+
+You can also stack explicit filter flags on `export`; multiple flags combine as
+AND:
+
+- `--stock`
+- `--rrid`
+- `--gene`
+- `--component`
+- `--fbid`
+- `--property`
+- `--relationship`
+- `--search`
+
+## Filter
+
+Use `filter` for human-facing compound queries without choosing a single lookup
+kind up front. Default dataset: `components`.
+
+Examples:
+
+```bash
+bdsc filter --gene Or56a --property lexA
+bdsc filter --gene Or67d --property qf
+bdsc filter --dataset stocks --property optogenetic
+bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
+```
 
 ## Terms
 

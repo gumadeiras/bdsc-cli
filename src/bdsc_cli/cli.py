@@ -11,6 +11,7 @@ from .core import (
     build_index,
     EXPORT_DATASETS,
     format_component_results,
+    format_dataset_results,
     format_gene_results,
     format_lookup_result,
     format_search_results,
@@ -25,6 +26,7 @@ from .core import (
     live_search,
     LOOKUP_KINDS,
     lookup_query,
+    QueryCriterion,
     resolve_state_dir,
     search_component,
     search_fbid,
@@ -34,6 +36,18 @@ from .core import (
     search_relationship,
     sync_datasets,
     TERM_SCOPES,
+)
+
+
+FILTER_ARGUMENTS = (
+    ("stock", "match stock number"),
+    ("rrid", "match RRID:BDSC_*"),
+    ("gene", "match gene symbol or FBgn"),
+    ("component", "match component symbol"),
+    ("fbid", "match FlyBase component id"),
+    ("property", "match component property synonym/description"),
+    ("relationship", "match component-gene relationship"),
+    ("search", "substring search across stock text"),
 )
 
 
@@ -69,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="interpret --query as this lookup kind",
     )
+    add_filter_arguments(export_parser)
     export_parser.add_argument(
         "--format",
         choices=("jsonl", "csv", "tsv"),
@@ -79,6 +94,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help="output path; defaults to stdout",
     )
+
+    filter_parser = subparsers.add_parser(
+        "filter",
+        help="compound AND filters across normalized datasets",
+    )
+    filter_parser.add_argument(
+        "--dataset",
+        choices=EXPORT_DATASETS,
+        default="components",
+        help="row shape to return",
+    )
+    filter_parser.add_argument("--state-dir", help="cache/index directory")
+    filter_parser.add_argument("--limit", type=int, default=20)
+    add_filter_arguments(filter_parser)
+    filter_parser.add_argument("--json", action="store_true")
+    filter_parser.add_argument("--jsonl", action="store_true")
 
     terms_parser = subparsers.add_parser(
         "terms",
@@ -189,6 +220,26 @@ def print_jsonl(rows: list[dict]) -> None:
         print(json.dumps(row, ensure_ascii=False))
 
 
+def add_filter_arguments(parser: argparse.ArgumentParser) -> None:
+    for kind, help_text in FILTER_ARGUMENTS:
+        parser.add_argument(
+            f"--{kind}",
+            dest=f"{kind}_filters",
+            action="append",
+            default=[],
+            help=help_text,
+        )
+
+
+def build_filter_criteria(args: argparse.Namespace) -> list[QueryCriterion]:
+    criteria: list[QueryCriterion] = []
+    for kind, _ in FILTER_ARGUMENTS:
+        for value in getattr(args, f"{kind}_filters", []):
+            if value.strip():
+                criteria.append(QueryCriterion(kind=kind, query=value))
+    return criteria
+
+
 def emit_output(
     payload: object,
     *,
@@ -273,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                     resolve_state_dir(args.state_dir),
                     args.dataset,
                     limit=args.limit,
+                    criteria=build_filter_criteria(args),
                     query=args.query,
                     kind=args.kind,
                 ),
@@ -280,6 +332,26 @@ def main(argv: list[str] | None = None) -> int:
                 output_path=args.output,
             )
             return 0
+
+        if args.command == "filter":
+            criteria = build_filter_criteria(args)
+            if not criteria:
+                parser.error("filter requires at least one filter flag")
+            rows = list(
+                iter_export_rows(
+                    resolve_state_dir(args.state_dir),
+                    args.dataset,
+                    limit=args.limit,
+                    criteria=criteria,
+                )
+            )
+            emit_output(
+                rows,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=lambda payload: format_dataset_results(args.dataset, payload),
+            )
+            return 0 if rows else 1
 
         if args.command == "terms":
             results = list_terms(
