@@ -1,0 +1,86 @@
+# AGENTS.md
+
+Purpose: fast agent use of `bdsc-cli` data.
+
+## Setup
+
+- repo root: `/Users/gumadeiras/git/bdsc-cli`
+- install: `.venv/bin/python -m pip install -e .`
+- cli: `.venv/bin/bdsc`
+- default local state: `~/.local/share/bdsc-cli`
+- custom state: `--state-dir /path/to/state`
+
+## Fetch
+
+- first sync:
+  - `.venv/bin/bdsc sync`
+- rebuild local index from existing CSVs:
+  - `.venv/bin/bdsc build-index`
+- check freshness/counts:
+  - `.venv/bin/bdsc status --json`
+
+Notes:
+- local data comes from public BDSC CSV dumps
+- local search/index is the default source of truth
+- `live-search` is optional; use only when you need current site behavior
+
+## Best Commands
+
+- fuzzy stock-level retrieval:
+  - `.venv/bin/bdsc search 'Or56a Lexa' --json`
+- direct typed retrieval:
+  - `.venv/bin/bdsc gene Chronis --json`
+  - `.venv/bin/bdsc component 'Or56a Lexa' --json`
+  - `.venv/bin/bdsc property optogen --json`
+  - `.venv/bin/bdsc relationship codng --json`
+- one mixed query, auto-detect:
+  - `.venv/bin/bdsc lookup RRID:BDSC_77118 --json`
+- compound filters:
+  - `.venv/bin/bdsc filter --gene Or56a --property lexA --json`
+  - `.venv/bin/bdsc filter --dataset genes --property olfactory --relationship coding --jsonl`
+
+## Machine Consumption
+
+Prefer:
+- `--json` for one query / one payload
+- `--jsonl` for lists, batches, streaming, and agent pipelines
+- `export` for normalized rows
+
+Examples:
+- batch lookup:
+  - `printf 'Chronos\nFBti0195688\n' | .venv/bin/bdsc lookup --input - --jsonl`
+- export normalized subsets:
+  - `.venv/bin/bdsc export components --gene Or56a --property lexA --format jsonl`
+  - `.venv/bin/bdsc export genes --property olfactory --relationship coding --format jsonl`
+
+Datasets:
+- `stocks`
+- `components`
+- `genes`
+- `properties`
+
+## Discovery
+
+Use vocab discovery before narrow filtering:
+
+- `.venv/bin/bdsc terms properties --limit 20 --json`
+- `.venv/bin/bdsc terms relationships --limit 20 --json`
+- `.venv/bin/bdsc terms property-descriptions --query optogenetic --json`
+
+## Query Strategy
+
+Use this order:
+
+1. `terms` if you do not know the controlled vocabulary
+2. `gene` / `component` / `property` / `relationship` for typed intent
+3. `filter` for intersections
+4. `export ... --format jsonl` for downstream agent processing
+5. `search` when the term is messy, partial, or typo-prone
+6. `live-search` only for site-current behavior
+
+## Expectations
+
+- `search` and direct query commands are typo-tolerant, not semantic search
+- exact matches should rank first; fuzzy fallback broadens recall
+- BDSC data is large; keep agent prompts/results scoped with `--limit`
+- use `filter` or `export` instead of post-filtering raw prose output
