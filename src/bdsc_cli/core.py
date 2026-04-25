@@ -38,6 +38,15 @@ class SyncResult:
     metadata: dict[str, Any]
 
 
+@dataclass
+class GeneMatch:
+    stknum: int
+    genotype: str
+    component_symbol: str
+    gene_symbol: str
+    fbgn: str
+
+
 def resolve_state_dir(value: str | Path | None) -> Path:
     return Path(value).expanduser() if value else DEFAULT_STATE_DIR
 
@@ -203,6 +212,7 @@ def _require_files(state_dir: Path) -> None:
 def build_index(state_dir: Path) -> dict[str, int]:
     ensure_state_dir(state_dir)
     _require_files(state_dir)
+    manifest = load_manifest(state_dir)
 
     bloomington_rows = _iter_csv_rows(raw_file(state_dir, "bloomington"))
     component_rows = _iter_csv_rows(raw_file(state_dir, "stockcomps_map_comments"))
@@ -493,7 +503,7 @@ def build_index(state_dir: Path) -> dict[str, int]:
             )
 
         conn.commit()
-        return {
+        counts = {
             "stocks": len(bloomington_rows),
             "component_comments": len(component_rows),
             "stockgenes": len(stockgene_rows),
@@ -501,6 +511,13 @@ def build_index(state_dir: Path) -> dict[str, int]:
             "compprops": len(compprop_rows),
             "fts_enabled": int(fts_enabled),
         }
+        manifest["index"] = {
+            "db_path": str(db_path),
+            "built_at": _now_iso(),
+            "counts": counts,
+        }
+        save_manifest(state_dir, manifest)
+        return counts
     finally:
         conn.close()
 
@@ -576,6 +593,55 @@ def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str,
                 (f"%{query}%", limit),
             ).fetchall()
 
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query:
+        return []
+
+    conn = _connect(state_dir)
+    try:
+        if query.upper().startswith("FBGN"):
+            rows = conn.execute(
+                """
+                SELECT DISTINCT
+                  sg.stknum,
+                  sg.genotype,
+                  sg.component_symbol,
+                  sg.gene_symbol,
+                  sg.fbgn
+                FROM stockgenes sg
+                WHERE UPPER(sg.fbgn) = UPPER(?)
+                ORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol
+                LIMIT ?
+                """,
+                (query, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT
+                  sg.stknum,
+                  sg.genotype,
+                  sg.component_symbol,
+                  sg.gene_symbol,
+                  sg.fbgn
+                FROM stockgenes sg
+                WHERE LOWER(sg.gene_symbol) = LOWER(?)
+                   OR LOWER(sg.gene_symbol) LIKE LOWER(?)
+                ORDER BY
+                  CASE WHEN LOWER(sg.gene_symbol) = LOWER(?) THEN 0 ELSE 1 END,
+                  sg.stknum,
+                  sg.component_symbol,
+                  sg.gene_symbol
+                LIMIT ?
+                """,
+                (query, f"{query}%", query, limit),
+            ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
@@ -693,6 +759,47 @@ def live_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     return (advanced_data.get("Data") or [])[:limit]
 
 
+def get_status(state_dir: Path) -> dict[str, Any]:
+    state_dir = resolve_state_dir(state_dir)
+    manifest = load_manifest(state_dir)
+    datasets = manifest.get("datasets", {})
+    db_path = db_file(state_dir)
+    index_info = manifest.get("index")
+    if index_info is None and db_path.exists():
+        conn = sqlite3.connect(db_path)
+        try:
+            has_fts = bool(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_fts'"
+                ).fetchone()
+            )
+            index_info = {
+                "db_path": str(db_path),
+                "built_at": None,
+                "counts": {
+                    "stocks": conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0],
+                    "component_comments": conn.execute(
+                        "SELECT COUNT(*) FROM component_comments"
+                    ).fetchone()[0],
+                    "stockgenes": conn.execute("SELECT COUNT(*) FROM stockgenes").fetchone()[0],
+                    "compgenes": conn.execute("SELECT COUNT(*) FROM compgenes").fetchone()[0],
+                    "compprops": conn.execute("SELECT COUNT(*) FROM compprops").fetchone()[0],
+                    "fts_enabled": int(has_fts),
+                },
+            }
+        finally:
+            conn.close()
+    return {
+        "state_dir": str(state_dir),
+        "db_path": str(db_path),
+        "db_exists": db_path.exists(),
+        "dataset_count": len(datasets),
+        "datasets": datasets,
+        "index": index_info,
+        "updated_at": manifest.get("updated_at"),
+    }
+
+
 def format_sync_results(results: list[SyncResult]) -> str:
     lines = []
     for result in results:
@@ -714,6 +821,25 @@ def format_search_results(results: list[dict[str, Any]]) -> str:
         if genes:
             bits.append(f"genes={genes}")
         lines.append(" | ".join(bits))
+    return "\n".join(lines)
+
+
+def format_gene_results(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return "no results"
+    lines = []
+    for row in results:
+        lines.append(
+            " | ".join(
+                [
+                    str(row["stknum"]),
+                    row["gene_symbol"],
+                    row["fbgn"],
+                    row["component_symbol"],
+                    row["genotype"],
+                ]
+            )
+        )
     return "\n".join(lines)
 
 

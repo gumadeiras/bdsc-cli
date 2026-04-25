@@ -44,6 +44,7 @@ Search locally:
 ```bash
 bdsc search Chronos
 bdsc search FBgn0003996 --json
+bdsc search Chronos --jsonl
 ```
 
 Inspect one stock:
@@ -59,6 +60,19 @@ Hit the live BDSC search endpoint directly:
 bdsc live-search Chronos
 ```
 
+Query by gene symbol or FBgn:
+
+```bash
+bdsc gene Chronos
+bdsc gene FBgn0003996 --json
+```
+
+Inspect cache/index status:
+
+```bash
+bdsc status
+```
+
 Use a custom cache/index location:
 
 ```bash
@@ -70,7 +84,9 @@ bdsc search Chronos --state-dir ./data
 
 - `bdsc sync`: download the BDSC CSV datasets; builds the index by default
 - `bdsc build-index`: rebuild the SQLite index from previously downloaded CSVs
+- `bdsc status`: show local dataset freshness and index metadata
 - `bdsc search <query>`: local full-text search
+- `bdsc gene <query>`: exact/prefix lookup by gene symbol or FBgn
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
 

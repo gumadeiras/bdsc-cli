@@ -7,12 +7,15 @@ import sys
 from . import __version__
 from .core import (
     build_index,
+    format_gene_results,
     format_search_results,
     format_stock,
     format_sync_results,
+    get_status,
     get_stock,
     live_search,
     resolve_state_dir,
+    search_gene,
     search_local,
     sync_datasets,
 )
@@ -37,11 +40,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_parser_cmd.add_argument("--state-dir", help="cache/index directory")
 
+    status_parser = subparsers.add_parser(
+        "status", help="show local dataset/index status for the current state dir"
+    )
+    status_parser.add_argument("--state-dir", help="cache/index directory")
+
     search_parser = subparsers.add_parser("search", help="query the local SQLite index")
     search_parser.add_argument("query")
     search_parser.add_argument("--state-dir", help="cache/index directory")
     search_parser.add_argument("--limit", type=int, default=10)
     search_parser.add_argument("--json", action="store_true")
+    search_parser.add_argument("--jsonl", action="store_true")
+
+    gene_parser = subparsers.add_parser(
+        "gene", help="query stocks by gene symbol or FBgn identifier"
+    )
+    gene_parser.add_argument("query")
+    gene_parser.add_argument("--state-dir", help="cache/index directory")
+    gene_parser.add_argument("--limit", type=int, default=20)
+    gene_parser.add_argument("--json", action="store_true")
+    gene_parser.add_argument("--jsonl", action="store_true")
 
     stock_parser = subparsers.add_parser("stock", help="show local details for one stock")
     stock_parser.add_argument("stknum", type=int)
@@ -54,8 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
     live_parser.add_argument("query")
     live_parser.add_argument("--limit", type=int, default=10)
     live_parser.add_argument("--json", action="store_true")
+    live_parser.add_argument("--jsonl", action="store_true")
 
     return parser
+
+
+def print_jsonl(rows: list[dict]) -> None:
+    for row in rows:
+        print(json.dumps(row, ensure_ascii=False))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,12 +102,28 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"indexed": counts, "state_dir": str(state_dir)}, indent=2))
             return 0
 
+        if args.command == "status":
+            print(json.dumps(get_status(resolve_state_dir(args.state_dir)), indent=2))
+            return 0
+
         if args.command == "search":
             results = search_local(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
             if args.json:
                 print(json.dumps(results, indent=2))
+            elif args.jsonl:
+                print_jsonl(results)
             else:
                 print(format_search_results(results))
+            return 0
+
+        if args.command == "gene":
+            results = search_gene(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
+            if args.json:
+                print(json.dumps(results, indent=2))
+            elif args.jsonl:
+                print_jsonl(results)
+            else:
+                print(format_gene_results(results))
             return 0
 
         if args.command == "stock":
@@ -98,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
             results = live_search(args.query, limit=args.limit)
             if args.json:
                 print(json.dumps(results, indent=2))
+            elif args.jsonl:
+                print_jsonl(results)
             else:
                 print(format_search_results(results))
             return 0
@@ -111,4 +153,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

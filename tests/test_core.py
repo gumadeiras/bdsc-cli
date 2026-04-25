@@ -4,7 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bdsc_cli.core import build_fts_query, build_index, get_stock, search_local
+from bdsc_cli.core import (
+    build_fts_query,
+    build_index,
+    get_status,
+    get_stock,
+    search_gene,
+    search_local,
+)
 
 
 BLOOMINGTON = """\
@@ -69,6 +76,15 @@ class CoreTests(unittest.TestCase):
         assert stock is not None
         self.assertEqual(stock["rrid"], "RRID:BDSC_77118")
         self.assertEqual(stock["genes"][0]["gene_symbol"], "Chronos")
+
+    def test_gene_search_and_status(self) -> None:
+        build_index(self.state_dir)
+        results = search_gene(self.state_dir, "Chronos")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["fbgn"], "FBgn0000001")
+        status = get_status(self.state_dir)
+        self.assertTrue(status["db_exists"])
+        self.assertEqual(status["index"]["counts"]["stocks"], 2)
 
 
 if __name__ == "__main__":
