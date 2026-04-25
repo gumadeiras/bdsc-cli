@@ -159,6 +159,7 @@ bdsc stock 77118 --json
 - `bdsc property <query>`: lookup by component property synonym/description
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
+- `bdsc terms <scope>`: inspect available property/relationship vocab
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
 
@@ -222,6 +223,25 @@ bdsc export properties --limit 20 --format jsonl
 - `property`
 - `search`
 - `auto`
+
+## Terms
+
+Use `terms` when you need to discover the vocabulary before filtering.
+
+Scopes:
+
+- `properties`
+- `property-descriptions`
+- `relationships`
+
+Examples:
+
+```bash
+bdsc terms properties --limit 20
+bdsc terms properties --query VALIUM --json
+bdsc terms relationships --limit 20
+bdsc terms property-descriptions --query optogenetic --jsonl
+```
 
 ## Notes
 

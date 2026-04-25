@@ -16,10 +16,12 @@ from .core import (
     format_search_results,
     format_stock,
     format_sync_results,
+    format_term_results,
     get_status,
     get_stock,
     get_stock_by_rrid,
     iter_export_rows,
+    list_terms,
     live_search,
     LOOKUP_KINDS,
     lookup_query,
@@ -30,6 +32,7 @@ from .core import (
     search_local,
     search_property,
     sync_datasets,
+    TERM_SCOPES,
 )
 
 
@@ -75,6 +78,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help="output path; defaults to stdout",
     )
+
+    terms_parser = subparsers.add_parser(
+        "terms",
+        help="list available property/relationship vocab with counts",
+    )
+    terms_parser.add_argument("scope", choices=TERM_SCOPES)
+    terms_parser.add_argument("--state-dir", help="cache/index directory")
+    terms_parser.add_argument("--query", help="prefix/substring filter for the term list")
+    terms_parser.add_argument("--limit", type=int, default=50)
+    terms_parser.add_argument("--json", action="store_true")
+    terms_parser.add_argument("--jsonl", action="store_true")
 
     status_parser = subparsers.add_parser(
         "status", help="show local dataset/index status for the current state dir"
@@ -254,6 +268,21 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 output_format=args.format,
                 output_path=args.output,
+            )
+            return 0
+
+        if args.command == "terms":
+            results = list_terms(
+                resolve_state_dir(args.state_dir),
+                args.scope,
+                query=args.query,
+                limit=args.limit,
+            )
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_term_results,
             )
             return 0
 

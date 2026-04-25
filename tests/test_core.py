@@ -9,6 +9,7 @@ from bdsc_cli.core import (
     build_index,
     detect_query_kind,
     iter_export_rows,
+    list_terms,
     get_status,
     get_stock,
     get_stock_by_rrid,
@@ -157,6 +158,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(components[0]["component_symbol"], "P{10XUAS-Chronos-mVenus}attP2")
         properties = list(iter_export_rows(self.state_dir, "properties", query="opto", kind="property"))
         self.assertEqual(len(properties), 2)
+
+    def test_list_terms(self) -> None:
+        build_index(self.state_dir)
+        props = list_terms(self.state_dir, "properties", limit=5)
+        self.assertEqual(props[0]["term"], "opto")
+        self.assertEqual(props[0]["count"], 2)
+        relationships = list_terms(self.state_dir, "relationships", limit=5)
+        self.assertEqual(relationships[0]["term"], "coding")
+        descriptions = list_terms(self.state_dir, "property-descriptions", query="optogenetic", limit=5)
+        self.assertEqual(descriptions[0]["synonym"], "opto")
 
 
 if __name__ == "__main__":

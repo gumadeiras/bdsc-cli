@@ -48,6 +48,7 @@ class GeneMatch:
 
 LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "property", "search")
 EXPORT_DATASETS = ("stocks", "components", "genes", "properties")
+TERM_SCOPES = ("properties", "property-descriptions", "relationships")
 
 
 def resolve_state_dir(value: str | Path | None) -> Path:
@@ -1343,6 +1344,79 @@ def iter_export_rows(
         conn.close()
 
 
+def list_terms(
+    state_dir: Path,
+    scope: str,
+    *,
+    query: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if scope not in TERM_SCOPES:
+        raise ValueError(f"unsupported term scope: {scope}")
+
+    query = (query or "").strip()
+    conn = _connect(state_dir)
+    try:
+        if scope == "properties":
+            sql = """
+                SELECT
+                  prop_syn AS term,
+                  MIN(property_descrip) AS description,
+                  COUNT(*) AS count
+                FROM compprops
+                WHERE prop_syn != ''
+            """
+            params: list[Any] = []
+            if query:
+                sql += " AND LOWER(prop_syn) LIKE LOWER(?)"
+                params.append(f"{query}%")
+            sql += """
+                GROUP BY prop_syn
+                ORDER BY count DESC, term
+                LIMIT ?
+            """
+        elif scope == "property-descriptions":
+            sql = """
+                SELECT
+                  property_descrip AS term,
+                  MIN(prop_syn) AS synonym,
+                  COUNT(*) AS count
+                FROM compprops
+                WHERE property_descrip != ''
+            """
+            params = []
+            if query:
+                sql += " AND LOWER(property_descrip) LIKE LOWER(?)"
+                params.append(f"%{query}%")
+            sql += """
+                GROUP BY property_descrip
+                ORDER BY count DESC, term
+                LIMIT ?
+            """
+        else:
+            sql = """
+                SELECT
+                  prop_syn AS term,
+                  COUNT(*) AS count
+                FROM compgenes
+                WHERE prop_syn != ''
+            """
+            params = []
+            if query:
+                sql += " AND LOWER(prop_syn) LIKE LOWER(?)"
+                params.append(f"{query}%")
+            sql += """
+                GROUP BY prop_syn
+                ORDER BY count DESC, term
+                LIMIT ?
+            """
+
+        rows = conn.execute(sql, (*params, limit)).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def format_sync_results(results: list[SyncResult]) -> str:
     lines = []
     for result in results:
@@ -1406,6 +1480,20 @@ def format_component_results(results: list[dict[str, Any]]) -> str:
         if relationships:
             bits.append(f"rels={relationships}")
         lines.append(" | ".join(bits + [row["genotype"]]))
+    return "\n".join(lines)
+
+
+def format_term_results(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return "no results"
+    lines = []
+    for row in results:
+        bits = [row["term"], f"count={row['count']}"]
+        if row.get("description"):
+            bits.append(row["description"])
+        if row.get("synonym"):
+            bits.append(f"synonym={row['synonym']}")
+        lines.append(" | ".join(bits))
     return "\n".join(lines)
 
 
