@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Sync and query BDSC datasets locally"
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["bdsc", "drosophila", "cli", "bioinformatics", "genetics"]
 authors = [
   { name = "Gustavo Madeira Santana" }
 ]
@@ -18,6 +19,11 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 
+[project.urls]
+Homepage = "https://github.com/gumadeiras/bdsc-cli"
+Repository = "https://github.com/gumadeiras/bdsc-cli"
+Issues = "https://github.com/gumadeiras/bdsc-cli/issues"
+
 [project.scripts]
 bdsc = "bdsc_cli.cli:main"
 
@@ -26,4 +32,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

@@ -3,6 +3,10 @@
 Small CLI for syncing public Bloomington Drosophila Stock Center datasets and
 querying them locally.
 
+Repo:
+
+- https://github.com/gumadeiras/bdsc-cli
+
 Primary source:
 
 - https://bdsc.indiana.edu/stocks/stockdata.html
@@ -18,11 +22,41 @@ No third-party Python dependencies.
 
 ## Install
 
+Preferred: `pipx`
+
+```bash
+pipx install git+https://github.com/gumadeiras/bdsc-cli.git
+```
+
+Repo-local dev install:
+
 ```bash
 cd ~/git/bdsc-cli
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
+```
+
+Check the CLI:
+
+```bash
+bdsc --help
+```
+
+## Quickstart
+
+Create a local cache and index:
+
+```bash
+bdsc sync
+```
+
+Then query it:
+
+```bash
+bdsc search Chronos
+bdsc gene Chronos
+bdsc stock 77118
 ```
 
 ## Usage
@@ -80,6 +114,15 @@ bdsc sync --state-dir ./data
 bdsc search Chronos --state-dir ./data
 ```
 
+Structured output for scripts or agents:
+
+```bash
+bdsc status --json
+bdsc search Chronos --jsonl
+bdsc gene FBgn0003996 --json
+bdsc stock 77118 --json
+```
+
 ## Commands
 
 - `bdsc sync`: download the BDSC CSV datasets; builds the index by default
@@ -97,3 +140,5 @@ bdsc search Chronos --state-dir ./data
 - Local lookup is built from the public CSV dumps, not the private site search
   endpoints.
 - The live endpoint is undocumented and may change without notice.
+- BDSC data is large enough that the first full sync/index can take a few
+  minutes depending on network and disk speed.
