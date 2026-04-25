@@ -647,6 +647,129 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
         conn.close()
 
 
+def resolve_rrid_to_stknum(query: str) -> int | None:
+    match = re.fullmatch(r"(?:RRID:)?BDSC_(\d+)", query.strip(), flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    if query.strip().isdigit():
+        return int(query.strip())
+    return None
+
+
+def get_stock_by_rrid(state_dir: Path, query: str) -> dict[str, Any] | None:
+    stknum = resolve_rrid_to_stknum(query)
+    if stknum is None:
+        return None
+    return get_stock(state_dir, stknum)
+
+
+def search_fbid(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query:
+        return []
+
+    conn = _connect(state_dir)
+    try:
+        exact = query.lower()
+        prefix = f"{query}%"
+        rows = conn.execute(
+            """
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              COALESCE((
+                SELECT group_concat(gene_symbol, ' ')
+                FROM (
+                  SELECT DISTINCT sg.gene_symbol AS gene_symbol
+                  FROM stockgenes sg
+                  WHERE sg.stknum = cc.stknum
+                    AND sg.component_symbol = cc.component_symbol
+                    AND sg.gene_symbol != ''
+                  ORDER BY sg.gene_symbol
+                )
+              ), '') AS gene_symbols,
+              COALESCE((
+                SELECT group_concat(fbgn, ' ')
+                FROM (
+                  SELECT DISTINCT sg.fbgn AS fbgn
+                  FROM stockgenes sg
+                  WHERE sg.stknum = cc.stknum
+                    AND sg.component_symbol = cc.component_symbol
+                    AND sg.fbgn != ''
+                  ORDER BY sg.fbgn
+                )
+              ), '') AS fbgns
+            FROM component_comments cc
+            WHERE LOWER(cc.fbid) = ?
+               OR LOWER(cc.fbid) LIKE LOWER(?)
+            ORDER BY
+              CASE WHEN LOWER(cc.fbid) = ? THEN 0 ELSE 1 END,
+              cc.stknum,
+              cc.component_symbol
+            LIMIT ?
+            """,
+            (exact, prefix, exact, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query:
+        return []
+
+    conn = _connect(state_dir)
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              COALESCE((
+                SELECT group_concat(gene_symbol, ' ')
+                FROM (
+                  SELECT DISTINCT sg.gene_symbol AS gene_symbol
+                  FROM stockgenes sg
+                  WHERE sg.stknum = cc.stknum
+                    AND sg.component_symbol = cc.component_symbol
+                    AND sg.gene_symbol != ''
+                  ORDER BY sg.gene_symbol
+                )
+              ), '') AS gene_symbols,
+              COALESCE((
+                SELECT group_concat(fbgn, ' ')
+                FROM (
+                  SELECT DISTINCT sg.fbgn AS fbgn
+                  FROM stockgenes sg
+                  WHERE sg.stknum = cc.stknum
+                    AND sg.component_symbol = cc.component_symbol
+                    AND sg.fbgn != ''
+                  ORDER BY sg.fbgn
+                )
+              ), '') AS fbgns
+            FROM component_comments cc
+            WHERE LOWER(cc.component_symbol) = LOWER(?)
+               OR LOWER(cc.component_symbol) LIKE LOWER(?)
+            ORDER BY
+              CASE WHEN LOWER(cc.component_symbol) = LOWER(?) THEN 0 ELSE 1 END,
+              cc.stknum,
+              cc.component_symbol
+            LIMIT ?
+            """,
+            (query, f"{query}%", query, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def get_stock(state_dir: Path, stknum: int) -> dict[str, Any] | None:
     conn = _connect(state_dir)
     try:
@@ -840,6 +963,23 @@ def format_gene_results(results: list[dict[str, Any]]) -> str:
                 ]
             )
         )
+    return "\n".join(lines)
+
+
+def format_component_results(results: list[dict[str, Any]]) -> str:
+    if not results:
+        return "no results"
+    lines = []
+    for row in results:
+        bits = [
+            str(row["stknum"]),
+            row["component_symbol"],
+            row["fbid"],
+        ]
+        genes = row.get("gene_symbols") or row.get("fbgns") or ""
+        if genes:
+            bits.append(f"genes={genes}")
+        lines.append(" | ".join(bits + [row["genotype"]]))
     return "\n".join(lines)
 
 

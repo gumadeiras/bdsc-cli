@@ -9,6 +9,9 @@ from bdsc_cli.core import (
     build_index,
     get_status,
     get_stock,
+    get_stock_by_rrid,
+    search_component,
+    search_fbid,
     search_gene,
     search_local,
 )
@@ -85,6 +88,18 @@ class CoreTests(unittest.TestCase):
         status = get_status(self.state_dir)
         self.assertTrue(status["db_exists"])
         self.assertEqual(status["index"]["counts"]["stocks"], 2)
+
+    def test_component_fbid_and_rrid_queries(self) -> None:
+        build_index(self.state_dir)
+        component_results = search_component(self.state_dir, "P{10XUAS-Chronos")
+        self.assertEqual(len(component_results), 1)
+        self.assertEqual(component_results[0]["fbid"], "FBti0195688")
+        fbid_results = search_fbid(self.state_dir, "FBti0195688")
+        self.assertEqual(len(fbid_results), 1)
+        self.assertEqual(fbid_results[0]["stknum"], 77118)
+        stock = get_stock_by_rrid(self.state_dir, "RRID:BDSC_77118")
+        assert stock is not None
+        self.assertEqual(stock["stknum"], 77118)
 
 
 if __name__ == "__main__":

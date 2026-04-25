@@ -7,14 +7,18 @@ import sys
 from . import __version__
 from .core import (
     build_index,
+    format_component_results,
     format_gene_results,
     format_search_results,
     format_stock,
     format_sync_results,
     get_status,
     get_stock,
+    get_stock_by_rrid,
     live_search,
     resolve_state_dir,
+    search_component,
+    search_fbid,
     search_gene,
     search_local,
     sync_datasets,
@@ -61,10 +65,33 @@ def build_parser() -> argparse.ArgumentParser:
     gene_parser.add_argument("--json", action="store_true")
     gene_parser.add_argument("--jsonl", action="store_true")
 
+    component_parser = subparsers.add_parser(
+        "component", help="query stocks by component symbol"
+    )
+    component_parser.add_argument("query")
+    component_parser.add_argument("--state-dir", help="cache/index directory")
+    component_parser.add_argument("--limit", type=int, default=20)
+    component_parser.add_argument("--json", action="store_true")
+    component_parser.add_argument("--jsonl", action="store_true")
+
+    fbid_parser = subparsers.add_parser(
+        "fbid", help="query stocks by FlyBase component identifier"
+    )
+    fbid_parser.add_argument("query")
+    fbid_parser.add_argument("--state-dir", help="cache/index directory")
+    fbid_parser.add_argument("--limit", type=int, default=20)
+    fbid_parser.add_argument("--json", action="store_true")
+    fbid_parser.add_argument("--jsonl", action="store_true")
+
     stock_parser = subparsers.add_parser("stock", help="show local details for one stock")
     stock_parser.add_argument("stknum", type=int)
     stock_parser.add_argument("--state-dir", help="cache/index directory")
     stock_parser.add_argument("--json", action="store_true")
+
+    rrid_parser = subparsers.add_parser("rrid", help="show local details for one RRID:BDSC_*")
+    rrid_parser.add_argument("query")
+    rrid_parser.add_argument("--state-dir", help="cache/index directory")
+    rrid_parser.add_argument("--json", action="store_true")
 
     live_parser = subparsers.add_parser(
         "live-search", help="hit BDSC's current live search endpoint directly"
@@ -126,8 +153,38 @@ def main(argv: list[str] | None = None) -> int:
                 print(format_gene_results(results))
             return 0
 
+        if args.command == "component":
+            results = search_component(
+                resolve_state_dir(args.state_dir), args.query, limit=args.limit
+            )
+            if args.json:
+                print(json.dumps(results, indent=2))
+            elif args.jsonl:
+                print_jsonl(results)
+            else:
+                print(format_component_results(results))
+            return 0
+
+        if args.command == "fbid":
+            results = search_fbid(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
+            if args.json:
+                print(json.dumps(results, indent=2))
+            elif args.jsonl:
+                print_jsonl(results)
+            else:
+                print(format_component_results(results))
+            return 0
+
         if args.command == "stock":
             stock = get_stock(resolve_state_dir(args.state_dir), args.stknum)
+            if args.json:
+                print(json.dumps(stock, indent=2))
+            else:
+                print(format_stock(stock))
+            return 0 if stock else 1
+
+        if args.command == "rrid":
+            stock = get_stock_by_rrid(resolve_state_dir(args.state_dir), args.query)
             if args.json:
                 print(json.dumps(stock, indent=2))
             else:

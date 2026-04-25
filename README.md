@@ -56,6 +56,9 @@ Then query it:
 ```bash
 bdsc search Chronos
 bdsc gene Chronos
+bdsc component 'P{10XUAS-Chronos'
+bdsc fbid FBti0195688
+bdsc rrid RRID:BDSC_77118
 bdsc stock 77118
 ```
 
@@ -101,6 +104,14 @@ bdsc gene Chronos
 bdsc gene FBgn0003996 --json
 ```
 
+Query by component symbol, FlyBase component id, or RRID:
+
+```bash
+bdsc component 'P{10XUAS-Chronos'
+bdsc fbid FBti0195688
+bdsc rrid RRID:BDSC_77118
+```
+
 Inspect cache/index status:
 
 ```bash
@@ -130,6 +141,9 @@ bdsc stock 77118 --json
 - `bdsc status`: show local dataset freshness and index metadata
 - `bdsc search <query>`: local full-text search
 - `bdsc gene <query>`: exact/prefix lookup by gene symbol or FBgn
+- `bdsc component <query>`: exact/prefix lookup by component symbol
+- `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
+- `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
 
