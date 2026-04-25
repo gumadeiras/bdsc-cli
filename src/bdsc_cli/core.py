@@ -46,7 +46,7 @@ class GeneMatch:
     fbgn: str
 
 
-LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "search")
+LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "property", "search")
 
 
 def resolve_state_dir(value: str | Path | None) -> Path:
@@ -649,6 +649,67 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
         conn.close()
 
 
+def _component_metadata_subqueries(
+    stock_num_expr: str,
+    component_symbol_expr: str,
+    symbol_id_expr: str,
+) -> str:
+    return f"""
+      COALESCE((
+        SELECT group_concat(gene_symbol, ' ')
+        FROM (
+          SELECT DISTINCT sg.gene_symbol AS gene_symbol
+          FROM stockgenes sg
+          WHERE sg.stknum = {stock_num_expr}
+            AND sg.component_symbol = {component_symbol_expr}
+            AND sg.gene_symbol != ''
+          ORDER BY sg.gene_symbol
+        )
+      ), '') AS gene_symbols,
+      COALESCE((
+        SELECT group_concat(fbgn, ' ')
+        FROM (
+          SELECT DISTINCT sg.fbgn AS fbgn
+          FROM stockgenes sg
+          WHERE sg.stknum = {stock_num_expr}
+            AND sg.component_symbol = {component_symbol_expr}
+            AND sg.fbgn != ''
+          ORDER BY sg.fbgn
+        )
+      ), '') AS fbgns,
+      COALESCE((
+        SELECT group_concat(prop_syn, ' | ')
+        FROM (
+          SELECT DISTINCT cp.prop_syn AS prop_syn
+          FROM compprops cp
+          WHERE cp.bdsc_symbol_id = {symbol_id_expr}
+            AND cp.prop_syn != ''
+          ORDER BY cp.prop_syn
+        )
+      ), '') AS property_syns,
+      COALESCE((
+        SELECT group_concat(property_descrip, ' | ')
+        FROM (
+          SELECT DISTINCT cp.property_descrip AS property_descrip
+          FROM compprops cp
+          WHERE cp.bdsc_symbol_id = {symbol_id_expr}
+            AND cp.property_descrip != ''
+          ORDER BY cp.property_descrip
+        )
+      ), '') AS property_descriptions,
+      COALESCE((
+        SELECT group_concat(prop_syn, ' | ')
+        FROM (
+          SELECT DISTINCT cg.prop_syn AS prop_syn
+          FROM compgenes cg
+          WHERE cg.bdsc_symbol_id = {symbol_id_expr}
+            AND cg.prop_syn != ''
+          ORDER BY cg.prop_syn
+        )
+      ), '') AS gene_relationships
+    """
+
+
 def _search_component_table(
     state_dir: Path,
     *,
@@ -673,28 +734,11 @@ def _search_component_table(
               cc.component_symbol,
               cc.fbid,
               cc.mapstatement,
-              COALESCE((
-                SELECT group_concat(gene_symbol, ' ')
-                FROM (
-                  SELECT DISTINCT sg.gene_symbol AS gene_symbol
-                  FROM stockgenes sg
-                  WHERE sg.stknum = cc.stknum
-                    AND sg.component_symbol = cc.component_symbol
-                    AND sg.gene_symbol != ''
-                  ORDER BY sg.gene_symbol
-                )
-              ), '') AS gene_symbols,
-              COALESCE((
-                SELECT group_concat(fbgn, ' ')
-                FROM (
-                  SELECT DISTINCT sg.fbgn AS fbgn
-                  FROM stockgenes sg
-                  WHERE sg.stknum = cc.stknum
-                    AND sg.component_symbol = cc.component_symbol
-                    AND sg.fbgn != ''
-                  ORDER BY sg.fbgn
-                )
-              ), '') AS fbgns
+              {_component_metadata_subqueries(
+                  "cc.stknum",
+                  "cc.component_symbol",
+                  "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
+              )}
             FROM component_comments cc
             WHERE LOWER(cc.{column}) = LOWER(?)
                OR LOWER(cc.{column}) LIKE LOWER(?)
@@ -705,6 +749,52 @@ def _search_component_table(
             LIMIT ?
             """,
             (query, f"{query}%", query, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query:
+        return []
+
+    conn = _connect(state_dir)
+    try:
+        rows = conn.execute(
+            f"""
+            WITH matching_props AS (
+              SELECT DISTINCT bdsc_symbol_id
+              FROM compprops
+              WHERE LOWER(prop_syn) = LOWER(?)
+                 OR LOWER(prop_syn) LIKE LOWER(?)
+                 OR LOWER(property_descrip) LIKE LOWER(?)
+            )
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
+            FROM component_comments cc
+            JOIN stockgenes sg0
+              ON sg0.stknum = cc.stknum
+             AND sg0.component_symbol = cc.component_symbol
+            JOIN matching_props mp
+              ON mp.bdsc_symbol_id = sg0.bdsc_symbol_id
+            GROUP BY
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              sg0.bdsc_symbol_id
+            ORDER BY cc.stknum, cc.component_symbol
+            LIMIT ?
+            """,
+            (query, f"{query}%", f"%{query}%", limit),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -782,6 +872,8 @@ def lookup_query(
         results = search_fbid(state_dir, query, limit=limit)
     elif resolved_kind == "component":
         results = search_component(state_dir, query, limit=limit)
+    elif resolved_kind == "property":
+        results = search_property(state_dir, query, limit=limit)
     elif resolved_kind == "search":
         results = search_local(state_dir, query, limit=limit)
     else:
@@ -822,14 +914,19 @@ def get_stock(state_dir: Path, stknum: int) -> dict[str, Any] | None:
             return None
 
         component_rows = conn.execute(
-            """
+            f"""
             SELECT
               component_symbol,
               fbid,
               mapstatement,
               comment1,
               comment2,
-              comment3
+              comment3,
+              {_component_metadata_subqueries(
+                  "component_comments.stknum",
+                  "component_comments.component_symbol",
+                  "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = component_comments.stknum AND sg.component_symbol = component_comments.component_symbol)",
+              )}
             FROM component_comments
             WHERE stknum = ?
             ORDER BY component_symbol
@@ -1005,6 +1102,12 @@ def format_component_results(results: list[dict[str, Any]]) -> str:
         genes = row.get("gene_symbols") or row.get("fbgns") or ""
         if genes:
             bits.append(f"genes={genes}")
+        properties = row.get("property_syns") or ""
+        if properties:
+            bits.append(f"props={properties}")
+        relationships = row.get("gene_relationships") or ""
+        if relationships:
+            bits.append(f"rels={relationships}")
         lines.append(" | ".join(bits + [row["genotype"]]))
     return "\n".join(lines)
 
@@ -1017,7 +1120,7 @@ def format_lookup_result(result: dict[str, Any]) -> str:
         body = format_stock(rows[0] if rows else None)
     elif kind == "gene":
         body = format_gene_results(rows)
-    elif kind == "component" or kind == "fbid":
+    elif kind in {"component", "fbid", "property"}:
         body = format_component_results(rows)
     else:
         body = format_search_results(rows)
@@ -1048,13 +1151,23 @@ def format_stock(stock: dict[str, Any] | None) -> str:
         for row in stock["components"][:20]:
             detail = "; ".join(
                 part
-                for part in [row["fbid"], row["mapstatement"], row["comment1"], row["comment2"], row["comment3"]]
+                for part in [
+                    row["fbid"],
+                    row["mapstatement"],
+                    row["comment1"],
+                    row["comment2"],
+                    row["comment3"],
+                ]
                 if part
             )
             if detail:
                 lines.append(f"  - {row['component_symbol']}: {detail}")
             else:
                 lines.append(f"  - {row['component_symbol']}")
+            if row.get("property_syns"):
+                lines.append(f"    properties: {row['property_syns']}")
+            if row.get("gene_relationships"):
+                lines.append(f"    gene_relationships: {row['gene_relationships']}")
 
     if stock["genes"]:
         lines.append("genes:")

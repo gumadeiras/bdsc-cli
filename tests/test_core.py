@@ -16,6 +16,7 @@ from bdsc_cli.core import (
     search_fbid,
     search_gene,
     search_local,
+    search_property,
 )
 
 
@@ -96,12 +97,15 @@ class CoreTests(unittest.TestCase):
         component_results = search_component(self.state_dir, "P{10XUAS-Chronos")
         self.assertEqual(len(component_results), 1)
         self.assertEqual(component_results[0]["fbid"], "FBti0195688")
+        self.assertEqual(component_results[0]["property_syns"], "opto")
+        self.assertEqual(component_results[0]["gene_relationships"], "coding")
         fbid_results = search_fbid(self.state_dir, "FBti0195688")
         self.assertEqual(len(fbid_results), 1)
         self.assertEqual(fbid_results[0]["stknum"], 77118)
         stock = get_stock_by_rrid(self.state_dir, "RRID:BDSC_77118")
         assert stock is not None
         self.assertEqual(stock["stknum"], 77118)
+        self.assertEqual(stock["components"][0]["property_syns"], "opto")
 
     def test_detect_query_kind(self) -> None:
         self.assertEqual(detect_query_kind("77118"), "stock")
@@ -116,9 +120,18 @@ class CoreTests(unittest.TestCase):
         result = lookup_query(self.state_dir, "RRID:BDSC_77118")
         self.assertEqual(result["kind"], "rrid")
         self.assertEqual(result["results"][0]["stknum"], 77118)
+        prop = lookup_query(self.state_dir, "opto", kind="property")
+        self.assertEqual(prop["kind"], "property")
+        self.assertEqual(prop["results"][0]["stknum"], 77118)
         fallback = lookup_query(self.state_dir, "optogenetic")
         self.assertEqual(fallback["kind"], "search")
         self.assertEqual(fallback["results"][0]["stknum"], 77118)
+
+    def test_property_search(self) -> None:
+        build_index(self.state_dir)
+        results = search_property(self.state_dir, "opto")
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["property_syns"], "opto")
 
 
 if __name__ == "__main__":

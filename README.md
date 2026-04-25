@@ -59,6 +59,7 @@ bdsc gene Chronos
 bdsc component 'P{10XUAS-Chronos'
 bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
+bdsc property VALIUM20
 bdsc lookup Chronos
 printf 'Chronos\nFBti0195688\n' | bdsc lookup --input - --jsonl
 bdsc stock 77118
@@ -114,6 +115,13 @@ bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
 ```
 
+Query by component property:
+
+```bash
+bdsc property VALIUM20
+bdsc property 'guide RNA'
+```
+
 Inspect cache/index status:
 
 ```bash
@@ -147,6 +155,7 @@ bdsc stock 77118 --json
 - `bdsc component <query>`: exact/prefix lookup by component symbol
 - `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
+- `bdsc property <query>`: lookup by component property synonym/description
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
@@ -163,6 +172,7 @@ Auto-detect rules:
 - `FBgn...` -> `gene`
 - `FBti...` / `FBal...` / similar `FB..` ids in the component table -> `fbid`
 - transgene/component-like text (`P{...}`, brackets, `attP`, `CyO`) -> `component`
+- `--kind property` when you want property-driven lookup explicitly
 - everything else -> `gene`, then local full-text `search` fallback if no gene hits
 
 Examples:
@@ -171,6 +181,7 @@ Examples:
 bdsc lookup Chronos
 bdsc lookup RRID:BDSC_77118
 bdsc lookup --kind component 'P{10XUAS-Chronos'
+bdsc lookup --kind property VALIUM20
 bdsc lookup --input queries.txt --json
 printf 'Chronos\nRRID:BDSC_77118\nFBti0195688\n' | bdsc lookup --input - --jsonl
 ```

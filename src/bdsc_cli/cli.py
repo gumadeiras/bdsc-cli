@@ -25,6 +25,7 @@ from .core import (
     search_fbid,
     search_gene,
     search_local,
+    search_property,
     sync_datasets,
 )
 
@@ -96,6 +97,15 @@ def build_parser() -> argparse.ArgumentParser:
     rrid_parser.add_argument("query")
     rrid_parser.add_argument("--state-dir", help="cache/index directory")
     rrid_parser.add_argument("--json", action="store_true")
+
+    property_parser = subparsers.add_parser(
+        "property", help="query stocks by component property synonym or description"
+    )
+    property_parser.add_argument("query")
+    property_parser.add_argument("--state-dir", help="cache/index directory")
+    property_parser.add_argument("--limit", type=int, default=20)
+    property_parser.add_argument("--json", action="store_true")
+    property_parser.add_argument("--jsonl", action="store_true")
 
     lookup_parser = subparsers.add_parser(
         "lookup",
@@ -232,6 +242,16 @@ def main(argv: list[str] | None = None) -> int:
             stock = get_stock_by_rrid(resolve_state_dir(args.state_dir), args.query)
             emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
             return 0 if stock else 1
+
+        if args.command == "property":
+            results = search_property(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_component_results,
+            )
+            return 0
 
         if args.command == "lookup":
             queries = load_queries(args.queries, args.input)
