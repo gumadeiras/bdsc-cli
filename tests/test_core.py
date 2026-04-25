@@ -7,9 +7,11 @@ from pathlib import Path
 from bdsc_cli.core import (
     build_fts_query,
     build_index,
+    detect_query_kind,
     get_status,
     get_stock,
     get_stock_by_rrid,
+    lookup_query,
     search_component,
     search_fbid,
     search_gene,
@@ -100,6 +102,23 @@ class CoreTests(unittest.TestCase):
         stock = get_stock_by_rrid(self.state_dir, "RRID:BDSC_77118")
         assert stock is not None
         self.assertEqual(stock["stknum"], 77118)
+
+    def test_detect_query_kind(self) -> None:
+        self.assertEqual(detect_query_kind("77118"), "stock")
+        self.assertEqual(detect_query_kind("RRID:BDSC_77118"), "rrid")
+        self.assertEqual(detect_query_kind("FBgn0000001"), "gene")
+        self.assertEqual(detect_query_kind("FBti0195688"), "fbid")
+        self.assertEqual(detect_query_kind("P{10XUAS-Chronos"), "component")
+        self.assertEqual(detect_query_kind("Chronos"), "gene")
+
+    def test_lookup_query_auto_and_fallback(self) -> None:
+        build_index(self.state_dir)
+        result = lookup_query(self.state_dir, "RRID:BDSC_77118")
+        self.assertEqual(result["kind"], "rrid")
+        self.assertEqual(result["results"][0]["stknum"], 77118)
+        fallback = lookup_query(self.state_dir, "optogenetic")
+        self.assertEqual(fallback["kind"], "search")
+        self.assertEqual(fallback["results"][0]["stknum"], 77118)
 
 
 if __name__ == "__main__":

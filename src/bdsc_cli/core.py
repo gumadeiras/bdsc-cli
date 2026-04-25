@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -45,6 +44,9 @@ class GeneMatch:
     component_symbol: str
     gene_symbol: str
     fbgn: str
+
+
+LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "search")
 
 
 def resolve_state_dir(value: str | Path | None) -> Path:
@@ -647,85 +649,24 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
         conn.close()
 
 
-def resolve_rrid_to_stknum(query: str) -> int | None:
-    match = re.fullmatch(r"(?:RRID:)?BDSC_(\d+)", query.strip(), flags=re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-    if query.strip().isdigit():
-        return int(query.strip())
-    return None
-
-
-def get_stock_by_rrid(state_dir: Path, query: str) -> dict[str, Any] | None:
-    stknum = resolve_rrid_to_stknum(query)
-    if stknum is None:
-        return None
-    return get_stock(state_dir, stknum)
-
-
-def search_fbid(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def _search_component_table(
+    state_dir: Path,
+    *,
+    column: str,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
 
-    conn = _connect(state_dir)
-    try:
-        exact = query.lower()
-        prefix = f"{query}%"
-        rows = conn.execute(
-            """
-            SELECT
-              cc.stknum,
-              cc.genotype,
-              cc.component_symbol,
-              cc.fbid,
-              COALESCE((
-                SELECT group_concat(gene_symbol, ' ')
-                FROM (
-                  SELECT DISTINCT sg.gene_symbol AS gene_symbol
-                  FROM stockgenes sg
-                  WHERE sg.stknum = cc.stknum
-                    AND sg.component_symbol = cc.component_symbol
-                    AND sg.gene_symbol != ''
-                  ORDER BY sg.gene_symbol
-                )
-              ), '') AS gene_symbols,
-              COALESCE((
-                SELECT group_concat(fbgn, ' ')
-                FROM (
-                  SELECT DISTINCT sg.fbgn AS fbgn
-                  FROM stockgenes sg
-                  WHERE sg.stknum = cc.stknum
-                    AND sg.component_symbol = cc.component_symbol
-                    AND sg.fbgn != ''
-                  ORDER BY sg.fbgn
-                )
-              ), '') AS fbgns
-            FROM component_comments cc
-            WHERE LOWER(cc.fbid) = ?
-               OR LOWER(cc.fbid) LIKE LOWER(?)
-            ORDER BY
-              CASE WHEN LOWER(cc.fbid) = ? THEN 0 ELSE 1 END,
-              cc.stknum,
-              cc.component_symbol
-            LIMIT ?
-            """,
-            (exact, prefix, exact, limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
-
-
-def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
-    query = query.strip()
-    if not query:
-        return []
+    if column not in {"fbid", "component_symbol"}:
+        raise ValueError(f"unsupported component search column: {column}")
 
     conn = _connect(state_dir)
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT
               cc.stknum,
               cc.genotype,
@@ -755,10 +696,10 @@ def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[
                 )
               ), '') AS fbgns
             FROM component_comments cc
-            WHERE LOWER(cc.component_symbol) = LOWER(?)
-               OR LOWER(cc.component_symbol) LIKE LOWER(?)
+            WHERE LOWER(cc.{column}) = LOWER(?)
+               OR LOWER(cc.{column}) LIKE LOWER(?)
             ORDER BY
-              CASE WHEN LOWER(cc.component_symbol) = LOWER(?) THEN 0 ELSE 1 END,
+              CASE WHEN LOWER(cc.{column}) = LOWER(?) THEN 0 ELSE 1 END,
               cc.stknum,
               cc.component_symbol
             LIMIT ?
@@ -768,6 +709,91 @@ def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+def resolve_rrid_to_stknum(query: str) -> int | None:
+    match = re.fullmatch(r"(?:RRID:)?BDSC_(\d+)", query.strip(), flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    if query.strip().isdigit():
+        return int(query.strip())
+    return None
+
+
+def get_stock_by_rrid(state_dir: Path, query: str) -> dict[str, Any] | None:
+    stknum = resolve_rrid_to_stknum(query)
+    if stknum is None:
+        return None
+    return get_stock(state_dir, stknum)
+
+
+def search_fbid(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    return _search_component_table(state_dir, column="fbid", query=query, limit=limit)
+
+
+def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    return _search_component_table(
+        state_dir,
+        column="component_symbol",
+        query=query,
+        limit=limit,
+    )
+
+
+def detect_query_kind(query: str) -> str:
+    value = query.strip()
+    if not value:
+        return "search"
+    if value.isdigit():
+        return "stock"
+    if resolve_rrid_to_stknum(value) is not None and not value.isdigit():
+        return "rrid"
+    if re.fullmatch(r"FBgn\d+", value, flags=re.IGNORECASE):
+        return "gene"
+    if re.fullmatch(r"FB[a-z]{2}\d+", value, flags=re.IGNORECASE):
+        return "fbid"
+    if any(token in value for token in ("P{", "}", "[", "]", "attP", "CyO")):
+        return "component"
+    return "gene"
+
+
+def lookup_query(
+    state_dir: Path,
+    query: str,
+    *,
+    kind: str = "auto",
+    limit: int = 20,
+) -> dict[str, Any]:
+    requested_kind = kind
+    resolved_kind = detect_query_kind(query) if kind == "auto" else kind
+
+    if resolved_kind == "stock":
+        result = get_stock(state_dir, int(query.strip()))
+        results = [result] if result else []
+    elif resolved_kind == "rrid":
+        result = get_stock_by_rrid(state_dir, query)
+        results = [result] if result else []
+    elif resolved_kind == "gene":
+        results = search_gene(state_dir, query, limit=limit)
+        if kind == "auto" and not results:
+            resolved_kind = "search"
+            results = search_local(state_dir, query, limit=limit)
+    elif resolved_kind == "fbid":
+        results = search_fbid(state_dir, query, limit=limit)
+    elif resolved_kind == "component":
+        results = search_component(state_dir, query, limit=limit)
+    elif resolved_kind == "search":
+        results = search_local(state_dir, query, limit=limit)
+    else:
+        raise ValueError(f"unsupported lookup kind: {kind}")
+
+    return {
+        "query": query,
+        "requested_kind": requested_kind,
+        "kind": resolved_kind,
+        "result_count": len(results),
+        "results": results,
+    }
 
 
 def get_stock(state_dir: Path, stknum: int) -> dict[str, Any] | None:
@@ -980,6 +1006,22 @@ def format_component_results(results: list[dict[str, Any]]) -> str:
         if genes:
             bits.append(f"genes={genes}")
         lines.append(" | ".join(bits + [row["genotype"]]))
+    return "\n".join(lines)
+
+
+def format_lookup_result(result: dict[str, Any]) -> str:
+    lines = [f"query: {result['query']}", f"kind: {result['kind']}"]
+    rows = result["results"]
+    kind = result["kind"]
+    if kind in {"stock", "rrid"}:
+        body = format_stock(rows[0] if rows else None)
+    elif kind == "gene":
+        body = format_gene_results(rows)
+    elif kind == "component" or kind == "fbid":
+        body = format_component_results(rows)
+    else:
+        body = format_search_results(rows)
+    lines.append(body)
     return "\n".join(lines)
 
 

@@ -59,6 +59,8 @@ bdsc gene Chronos
 bdsc component 'P{10XUAS-Chronos'
 bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
+bdsc lookup Chronos
+printf 'Chronos\nFBti0195688\n' | bdsc lookup --input - --jsonl
 bdsc stock 77118
 ```
 
@@ -131,6 +133,7 @@ Structured output for scripts or agents:
 bdsc status --json
 bdsc search Chronos --jsonl
 bdsc gene FBgn0003996 --json
+bdsc lookup Chronos FBti0195688 --json
 bdsc stock 77118 --json
 ```
 
@@ -144,8 +147,33 @@ bdsc stock 77118 --json
 - `bdsc component <query>`: exact/prefix lookup by component symbol
 - `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
+- `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc stock <stknum>`: local stock details
 - `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
+
+## Batch Lookup
+
+Use `lookup` when the caller does not want to choose the query command up
+front.
+
+Auto-detect rules:
+
+- digits -> `stock`
+- `RRID:BDSC_*` or `BDSC_*` -> `rrid`
+- `FBgn...` -> `gene`
+- `FBti...` / `FBal...` / similar `FB..` ids in the component table -> `fbid`
+- transgene/component-like text (`P{...}`, brackets, `attP`, `CyO`) -> `component`
+- everything else -> `gene`, then local full-text `search` fallback if no gene hits
+
+Examples:
+
+```bash
+bdsc lookup Chronos
+bdsc lookup RRID:BDSC_77118
+bdsc lookup --kind component 'P{10XUAS-Chronos'
+bdsc lookup --input queries.txt --json
+printf 'Chronos\nRRID:BDSC_77118\nFBti0195688\n' | bdsc lookup --input - --jsonl
+```
 
 ## Notes
 

@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from . import __version__
 from .core import (
     build_index,
     format_component_results,
     format_gene_results,
+    format_lookup_result,
     format_search_results,
     format_stock,
     format_sync_results,
@@ -16,6 +18,8 @@ from .core import (
     get_stock,
     get_stock_by_rrid,
     live_search,
+    LOOKUP_KINDS,
+    lookup_query,
     resolve_state_dir,
     search_component,
     search_fbid,
@@ -93,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
     rrid_parser.add_argument("--state-dir", help="cache/index directory")
     rrid_parser.add_argument("--json", action="store_true")
 
+    lookup_parser = subparsers.add_parser(
+        "lookup",
+        help="auto-detect query kind; supports batch args or file/stdin input",
+    )
+    lookup_parser.add_argument("queries", nargs="*")
+    lookup_parser.add_argument("--state-dir", help="cache/index directory")
+    lookup_parser.add_argument("--kind", choices=LOOKUP_KINDS, default="auto")
+    lookup_parser.add_argument("--limit", type=int, default=20)
+    lookup_parser.add_argument(
+        "--input",
+        help="read newline-delimited queries from a file path or '-' for stdin",
+    )
+    lookup_parser.add_argument("--json", action="store_true")
+    lookup_parser.add_argument("--jsonl", action="store_true")
+
     live_parser = subparsers.add_parser(
         "live-search", help="hit BDSC's current live search endpoint directly"
     )
@@ -107,6 +126,35 @@ def build_parser() -> argparse.ArgumentParser:
 def print_jsonl(rows: list[dict]) -> None:
     for row in rows:
         print(json.dumps(row, ensure_ascii=False))
+
+
+def emit_output(
+    payload: object,
+    *,
+    as_json: bool,
+    as_jsonl: bool,
+    formatter,
+) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    if as_jsonl:
+        if not isinstance(payload, list):
+            raise ValueError("jsonl output requires a list payload")
+        print_jsonl(payload)
+        return
+    print(formatter(payload))
+
+
+def load_queries(positional_queries: list[str], input_path: str | None) -> list[str]:
+    queries = [query for query in positional_queries if query.strip()]
+    if input_path:
+        if input_path == "-":
+            source = sys.stdin.read()
+        else:
+            source = Path(input_path).read_text(encoding="utf-8")
+        queries.extend(line.strip() for line in source.splitlines() if line.strip())
+    return queries
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,70 +183,87 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "search":
             results = search_local(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            if args.json:
-                print(json.dumps(results, indent=2))
-            elif args.jsonl:
-                print_jsonl(results)
-            else:
-                print(format_search_results(results))
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_search_results,
+            )
             return 0
 
         if args.command == "gene":
             results = search_gene(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            if args.json:
-                print(json.dumps(results, indent=2))
-            elif args.jsonl:
-                print_jsonl(results)
-            else:
-                print(format_gene_results(results))
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_gene_results,
+            )
             return 0
 
         if args.command == "component":
             results = search_component(
                 resolve_state_dir(args.state_dir), args.query, limit=args.limit
             )
-            if args.json:
-                print(json.dumps(results, indent=2))
-            elif args.jsonl:
-                print_jsonl(results)
-            else:
-                print(format_component_results(results))
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_component_results,
+            )
             return 0
 
         if args.command == "fbid":
             results = search_fbid(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            if args.json:
-                print(json.dumps(results, indent=2))
-            elif args.jsonl:
-                print_jsonl(results)
-            else:
-                print(format_component_results(results))
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_component_results,
+            )
             return 0
 
         if args.command == "stock":
             stock = get_stock(resolve_state_dir(args.state_dir), args.stknum)
-            if args.json:
-                print(json.dumps(stock, indent=2))
-            else:
-                print(format_stock(stock))
+            emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
             return 0 if stock else 1
 
         if args.command == "rrid":
             stock = get_stock_by_rrid(resolve_state_dir(args.state_dir), args.query)
-            if args.json:
-                print(json.dumps(stock, indent=2))
-            else:
-                print(format_stock(stock))
+            emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
             return 0 if stock else 1
+
+        if args.command == "lookup":
+            queries = load_queries(args.queries, args.input)
+            if not queries:
+                parser.error("lookup requires at least one query or --input")
+            state_dir = resolve_state_dir(args.state_dir)
+            lookup_results = [
+                lookup_query(state_dir, query, kind=args.kind, limit=args.limit)
+                for query in queries
+            ]
+            if args.json:
+                print(
+                    json.dumps(
+                        lookup_results[0] if len(lookup_results) == 1 else lookup_results,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+            elif args.jsonl:
+                print_jsonl(lookup_results)
+            else:
+                print("\n\n".join(format_lookup_result(result) for result in lookup_results))
+            return 0 if all(result["results"] for result in lookup_results) else 1
 
         if args.command == "live-search":
             results = live_search(args.query, limit=args.limit)
-            if args.json:
-                print(json.dumps(results, indent=2))
-            elif args.jsonl:
-                print_jsonl(results)
-            else:
-                print(format_search_results(results))
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_search_results,
+            )
             return 0
 
         parser.error(f"unknown command: {args.command}")
