@@ -145,6 +145,19 @@ class CoreTests(unittest.TestCase):
         properties = list(iter_export_rows(self.state_dir, "properties", limit=2))
         self.assertEqual(properties[0]["prop_syn"], "opto")
 
+    def test_filtered_export_rows(self) -> None:
+        build_index(self.state_dir)
+        genes = list(iter_export_rows(self.state_dir, "genes", query="Chronos", kind="gene"))
+        self.assertEqual(len(genes), 1)
+        self.assertEqual(genes[0]["stknum"], 77118)
+        components = list(
+            iter_export_rows(self.state_dir, "components", query="FBti0195688", kind="fbid")
+        )
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0]["component_symbol"], "P{10XUAS-Chronos-mVenus}attP2")
+        properties = list(iter_export_rows(self.state_dir, "properties", query="opto", kind="property"))
+        self.assertEqual(len(properties), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

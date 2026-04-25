@@ -204,10 +204,24 @@ Examples:
 
 ```bash
 bdsc export stocks --limit 3
+bdsc export genes --query Chronos --kind gene
+bdsc export components --query FBti0195688 --kind fbid --format jsonl
+bdsc export properties --query VALIUM20 --kind property --format tsv
 bdsc export components --format tsv --output components.tsv
 bdsc export genes --format csv --output genes.csv
 bdsc export properties --limit 20 --format jsonl
 ```
+
+`export --query` uses the same lookup kinds as `lookup`:
+
+- `stock`
+- `rrid`
+- `gene`
+- `fbid`
+- `component`
+- `property`
+- `search`
+- `auto`
 
 ## Notes
 

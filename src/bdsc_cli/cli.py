@@ -58,6 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("dataset", choices=EXPORT_DATASETS)
     export_parser.add_argument("--state-dir", help="cache/index directory")
     export_parser.add_argument("--limit", type=int, help="max rows to emit")
+    export_parser.add_argument("--query", help="filter exported rows by a query value")
+    export_parser.add_argument(
+        "--kind",
+        choices=LOOKUP_KINDS,
+        default="auto",
+        help="interpret --query as this lookup kind",
+    )
     export_parser.add_argument(
         "--format",
         choices=("jsonl", "csv", "tsv"),
@@ -242,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
                     resolve_state_dir(args.state_dir),
                     args.dataset,
                     limit=args.limit,
+                    query=args.query,
+                    kind=args.kind,
                 ),
                 output_format=args.format,
                 output_path=args.output,

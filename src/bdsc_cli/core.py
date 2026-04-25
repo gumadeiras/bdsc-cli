@@ -848,6 +848,183 @@ def detect_query_kind(query: str) -> str:
     return "gene"
 
 
+def _prefix_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
+    return f"(LOWER({expr}) = LOWER(?) OR LOWER({expr}) LIKE LOWER(?))", [query, f"{query}%"]
+
+
+def _contains_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
+    return f"LOWER({expr}) LIKE LOWER(?)", [f"%{query}%"]
+
+
+def _gene_match_clause(fbgn_expr: str, gene_expr: str, query: str) -> tuple[str, list[Any]]:
+    if query.upper().startswith("FBGN"):
+        return f"UPPER({fbgn_expr}) = UPPER(?)", [query]
+    clause, params = _prefix_match_clause(gene_expr, query)
+    return clause, params
+
+
+def _resolve_export_filter(
+    dataset: str,
+    query: str | None,
+    kind: str,
+) -> tuple[str, list[Any], str | None]:
+    if not query:
+        return "", [], None
+
+    resolved_kind = detect_query_kind(query) if kind == "auto" else kind
+    params: list[Any] = []
+
+    if resolved_kind == "stock":
+        clause = {
+            "stocks": "s.stknum = ?",
+            "components": "cc.stknum = ?",
+            "genes": "sg.stknum = ?",
+            "properties": "cc.stknum = ?",
+        }[dataset]
+        params.append(int(query.strip()))
+        return f"WHERE {clause}", params, resolved_kind
+
+    if resolved_kind == "rrid":
+        stknum = resolve_rrid_to_stknum(query)
+        if stknum is None:
+            return "WHERE 0", [], resolved_kind
+        clause = {
+            "stocks": "s.stknum = ?",
+            "components": "cc.stknum = ?",
+            "genes": "sg.stknum = ?",
+            "properties": "cc.stknum = ?",
+        }[dataset]
+        params.append(stknum)
+        return f"WHERE {clause}", params, resolved_kind
+
+    if resolved_kind == "gene":
+        if dataset == "stocks":
+            clause, params = _gene_match_clause("sg.fbgn", "sg.gene_symbol", query)
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM stockgenes sg WHERE sg.stknum = s.stknum AND {clause})",
+                params,
+                resolved_kind,
+            )
+        if dataset == "components":
+            clause, params = _gene_match_clause("sg.fbgn", "sg.gene_symbol", query)
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol AND {clause})",
+                params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            clause, params = _gene_match_clause("sg.fbgn", "sg.gene_symbol", query)
+            return f"WHERE {clause}", params, resolved_kind
+        clause, params = _gene_match_clause("sg2.fbgn", "sg2.gene_symbol", query)
+        return (
+            f"WHERE EXISTS (SELECT 1 FROM stockgenes sg2 WHERE sg2.stknum = cc.stknum AND sg2.component_symbol = cc.component_symbol AND {clause})",
+            params,
+            resolved_kind,
+        )
+
+    if resolved_kind == "component":
+        clause, params = _prefix_match_clause(
+            {"stocks": "sg.component_symbol", "components": "cc.component_symbol", "genes": "sg.component_symbol", "properties": "cc.component_symbol"}[dataset],
+            query,
+        )
+        if dataset == "stocks":
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM stockgenes sg WHERE sg.stknum = s.stknum AND {clause})",
+                params,
+                resolved_kind,
+            )
+        return f"WHERE {clause}", params, resolved_kind
+
+    if resolved_kind == "fbid":
+        clause, params = _prefix_match_clause(
+            {"components": "cc.fbid", "properties": "cc.fbid"}[dataset]
+            if dataset in {"components", "properties"}
+            else "cc.fbid",
+            query,
+        )
+        if dataset == "stocks":
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM component_comments cc WHERE cc.stknum = s.stknum AND {clause})",
+                params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM component_comments cc WHERE cc.stknum = sg.stknum AND cc.component_symbol = sg.component_symbol AND {clause})",
+                params,
+                resolved_kind,
+            )
+        return f"WHERE {clause}", params, resolved_kind
+
+    if resolved_kind == "property":
+        if dataset == "stocks":
+            clause, params = _prefix_match_clause("cp.prop_syn", query)
+            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
+            return (
+                "WHERE EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+                f"WHERE sg.stknum = s.stknum AND ({clause} OR {contains_clause})"
+                ")",
+                params + contains_params,
+                resolved_kind,
+            )
+        if dataset == "components":
+            clause, params = _prefix_match_clause("cp.prop_syn", query)
+            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
+            return (
+                "WHERE EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+                "WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
+                f"AND ({clause} OR {contains_clause})"
+                ")",
+                params + contains_params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            clause, params = _prefix_match_clause("cp.prop_syn", query)
+            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM compprops cp WHERE cp.bdsc_symbol_id = sg.bdsc_symbol_id AND ({clause} OR {contains_clause}))",
+                params + contains_params,
+                resolved_kind,
+            )
+        clause, params = _prefix_match_clause("cp.prop_syn", query)
+        contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
+        return f"WHERE {clause} OR {contains_clause}", params + contains_params, resolved_kind
+
+    if resolved_kind == "search":
+        if dataset == "stocks":
+            clause, params = _contains_match_clause("sd.search_text", query)
+            return f"WHERE {clause}", params, resolved_kind
+        if dataset == "components":
+            clause, params = _contains_match_clause("sd.search_text", query)
+            return (
+                "WHERE EXISTS (SELECT 1 FROM search_documents sd "
+                f"WHERE sd.stknum = cc.stknum AND {clause})",
+                params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            clause, params = _contains_match_clause("sd.search_text", query)
+            return (
+                "WHERE EXISTS (SELECT 1 FROM search_documents sd "
+                f"WHERE sd.stknum = sg.stknum AND {clause})",
+                params,
+                resolved_kind,
+            )
+        clause, params = _contains_match_clause("sd.search_text", query)
+        return (
+            "WHERE EXISTS (SELECT 1 FROM search_documents sd "
+            f"WHERE sd.stknum = cc.stknum AND {clause})",
+            params,
+            resolved_kind,
+        )
+
+    raise ValueError(f"unsupported export filter kind: {kind}")
+
+
 def lookup_query(
     state_dir: Path,
     query: str,
@@ -1052,12 +1229,16 @@ def iter_export_rows(
     dataset: str,
     *,
     limit: int | None = None,
+    query: str | None = None,
+    kind: str = "auto",
 ) -> Iterator[dict[str, Any]]:
     if dataset not in EXPORT_DATASETS:
         raise ValueError(f"unsupported export dataset: {dataset}")
 
     conn = _connect(state_dir)
     try:
+        where_clause, params, _ = _resolve_export_filter(dataset, query, kind)
+
         if dataset == "stocks":
             sql = """
                 SELECT
@@ -1074,8 +1255,8 @@ def iter_export_rows(
                   COALESCE(sd.fbgns, '') AS fbgns
                 FROM stocks s
                 LEFT JOIN search_documents sd ON sd.stknum = s.stknum
-                ORDER BY s.stknum
             """
+            sql += f"\n{where_clause}\nORDER BY s.stknum"
         elif dataset == "components":
             sql = f"""
                 SELECT
@@ -1093,8 +1274,8 @@ def iter_export_rows(
                       "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
                   )}
                 FROM component_comments cc
-                ORDER BY cc.stknum, cc.component_symbol
             """
+            sql += f"\n{where_clause}\nORDER BY cc.stknum, cc.component_symbol"
         elif dataset == "genes":
             sql = """
                 SELECT DISTINCT
@@ -1121,8 +1302,8 @@ def iter_export_rows(
                 LEFT JOIN component_comments cc
                   ON cc.stknum = sg.stknum
                  AND cc.component_symbol = sg.component_symbol
-                ORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol, sg.fbgn
             """
+            sql += f"\n{where_clause}\nORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol, sg.fbgn"
         else:
             sql = """
                 SELECT DISTINCT
@@ -1139,14 +1320,14 @@ def iter_export_rows(
                  AND sg.component_symbol = cc.component_symbol
                 JOIN compprops cp
                   ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
-                ORDER BY cc.stknum, cc.component_symbol, cp.prop_syn, cp.property_id
             """
+            sql += f"\n{where_clause}\nORDER BY cc.stknum, cc.component_symbol, cp.prop_syn, cp.property_id"
 
         if limit is not None:
             sql += "\nLIMIT ?"
-            cursor = conn.execute(sql, (limit,))
+            cursor = conn.execute(sql, (*params, limit))
         else:
-            cursor = conn.execute(sql)
+            cursor = conn.execute(sql, params)
 
         columns = [description[0] for description in cursor.description]
         try:
