@@ -46,7 +46,17 @@ class GeneMatch:
     fbgn: str
 
 
-LOOKUP_KINDS = ("auto", "stock", "rrid", "gene", "fbid", "component", "property", "search")
+LOOKUP_KINDS = (
+    "auto",
+    "stock",
+    "rrid",
+    "gene",
+    "fbid",
+    "component",
+    "property",
+    "relationship",
+    "search",
+)
 EXPORT_DATASETS = ("stocks", "components", "genes", "properties")
 TERM_SCOPES = ("properties", "property-descriptions", "relationships")
 
@@ -803,6 +813,51 @@ def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[s
         conn.close()
 
 
+def search_relationship(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query:
+        return []
+
+    conn = _connect(state_dir)
+    try:
+        rows = conn.execute(
+            f"""
+            WITH matching_relationships AS (
+              SELECT DISTINCT bdsc_symbol_id
+              FROM compgenes
+              WHERE LOWER(prop_syn) = LOWER(?)
+                 OR LOWER(prop_syn) LIKE LOWER(?)
+            )
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              {_component_metadata_subqueries("cc.stknum", "cc.component_symbol", "sg0.bdsc_symbol_id")}
+            FROM component_comments cc
+            JOIN stockgenes sg0
+              ON sg0.stknum = cc.stknum
+             AND sg0.component_symbol = cc.component_symbol
+            JOIN matching_relationships mr
+              ON mr.bdsc_symbol_id = sg0.bdsc_symbol_id
+            GROUP BY
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              sg0.bdsc_symbol_id
+            ORDER BY cc.stknum, cc.component_symbol
+            LIMIT ?
+            """,
+            (query, f"{query}%", limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def resolve_rrid_to_stknum(query: str) -> int | None:
     match = re.fullmatch(r"(?:RRID:)?BDSC_(\d+)", query.strip(), flags=re.IGNORECASE)
     if match:
@@ -995,6 +1050,49 @@ def _resolve_export_filter(
         contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
         return f"WHERE {clause} OR {contains_clause}", params + contains_params, resolved_kind
 
+    if resolved_kind == "relationship":
+        if dataset == "stocks":
+            clause, params = _prefix_match_clause("cg.prop_syn", query)
+            return (
+                "WHERE EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compgenes cg ON cg.bdsc_symbol_id = sg.bdsc_symbol_id "
+                f"WHERE sg.stknum = s.stknum AND {clause}"
+                ")",
+                params,
+                resolved_kind,
+            )
+        if dataset == "components":
+            clause, params = _prefix_match_clause("cg.prop_syn", query)
+            return (
+                "WHERE EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compgenes cg ON cg.bdsc_symbol_id = sg.bdsc_symbol_id "
+                "WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
+                f"AND {clause}"
+                ")",
+                params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            clause, params = _prefix_match_clause("cg.prop_syn", query)
+            return (
+                f"WHERE EXISTS (SELECT 1 FROM compgenes cg WHERE cg.bdsc_symbol_id = sg.bdsc_symbol_id AND cg.bdsc_gene_id = sg.bdsc_gene_id AND {clause})",
+                params,
+                resolved_kind,
+            )
+        clause, params = _prefix_match_clause("cg.prop_syn", query)
+        return (
+            "WHERE EXISTS ("
+            "SELECT 1 FROM stockgenes sg2 "
+            "JOIN compgenes cg ON cg.bdsc_symbol_id = sg2.bdsc_symbol_id "
+            "WHERE sg2.stknum = cc.stknum AND sg2.component_symbol = cc.component_symbol "
+            f"AND {clause}"
+            ")",
+            params,
+            resolved_kind,
+        )
+
     if resolved_kind == "search":
         if dataset == "stocks":
             clause, params = _contains_match_clause("sd.search_text", query)
@@ -1053,6 +1151,8 @@ def lookup_query(
         results = search_component(state_dir, query, limit=limit)
     elif resolved_kind == "property":
         results = search_property(state_dir, query, limit=limit)
+    elif resolved_kind == "relationship":
+        results = search_relationship(state_dir, query, limit=limit)
     elif resolved_kind == "search":
         results = search_local(state_dir, query, limit=limit)
     else:
@@ -1505,7 +1605,7 @@ def format_lookup_result(result: dict[str, Any]) -> str:
         body = format_stock(rows[0] if rows else None)
     elif kind == "gene":
         body = format_gene_results(rows)
-    elif kind in {"component", "fbid", "property"}:
+    elif kind in {"component", "fbid", "property", "relationship"}:
         body = format_component_results(rows)
     else:
         body = format_search_results(rows)

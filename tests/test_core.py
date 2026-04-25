@@ -19,6 +19,7 @@ from bdsc_cli.core import (
     search_gene,
     search_local,
     search_property,
+    search_relationship,
 )
 
 
@@ -135,6 +136,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["property_syns"], "opto")
 
+    def test_relationship_search(self) -> None:
+        build_index(self.state_dir)
+        results = search_relationship(self.state_dir, "coding")
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["gene_relationships"], "coding")
+
     def test_export_rows(self) -> None:
         build_index(self.state_dir)
         stocks = list(iter_export_rows(self.state_dir, "stocks", limit=1))
@@ -158,6 +165,10 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(components[0]["component_symbol"], "P{10XUAS-Chronos-mVenus}attP2")
         properties = list(iter_export_rows(self.state_dir, "properties", query="opto", kind="property"))
         self.assertEqual(len(properties), 2)
+        relationships = list(
+            iter_export_rows(self.state_dir, "genes", query="coding", kind="relationship")
+        )
+        self.assertEqual(len(relationships), 2)
 
     def test_list_terms(self) -> None:
         build_index(self.state_dir)
@@ -168,6 +179,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(relationships[0]["term"], "coding")
         descriptions = list_terms(self.state_dir, "property-descriptions", query="optogenetic", limit=5)
         self.assertEqual(descriptions[0]["synonym"], "opto")
+
+    def test_lookup_relationship_kind(self) -> None:
+        build_index(self.state_dir)
+        result = lookup_query(self.state_dir, "coding", kind="relationship")
+        self.assertEqual(result["kind"], "relationship")
+        self.assertEqual(result["result_count"], 2)
 
 
 if __name__ == "__main__":

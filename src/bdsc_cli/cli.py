@@ -31,6 +31,7 @@ from .core import (
     search_gene,
     search_local,
     search_property,
+    search_relationship,
     sync_datasets,
     TERM_SCOPES,
 )
@@ -147,6 +148,15 @@ def build_parser() -> argparse.ArgumentParser:
     property_parser.add_argument("--limit", type=int, default=20)
     property_parser.add_argument("--json", action="store_true")
     property_parser.add_argument("--jsonl", action="store_true")
+
+    relationship_parser = subparsers.add_parser(
+        "relationship", help="query stocks by component-gene relationship label"
+    )
+    relationship_parser.add_argument("query")
+    relationship_parser.add_argument("--state-dir", help="cache/index directory")
+    relationship_parser.add_argument("--limit", type=int, default=20)
+    relationship_parser.add_argument("--json", action="store_true")
+    relationship_parser.add_argument("--jsonl", action="store_true")
 
     lookup_parser = subparsers.add_parser(
         "lookup",
@@ -344,6 +354,18 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "property":
             results = search_property(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
+            emit_output(
+                results,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=format_component_results,
+            )
+            return 0
+
+        if args.command == "relationship":
+            results = search_relationship(
+                resolve_state_dir(args.state_dir), args.query, limit=args.limit
+            )
             emit_output(
                 results,
                 as_json=args.json,

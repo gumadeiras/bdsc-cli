@@ -122,6 +122,13 @@ bdsc property VALIUM20
 bdsc property 'guide RNA'
 ```
 
+Query by component-gene relationship:
+
+```bash
+bdsc relationship RNAi
+bdsc relationship coding
+```
+
 Inspect cache/index status:
 
 ```bash
@@ -157,6 +164,7 @@ bdsc stock 77118 --json
 - `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
 - `bdsc property <query>`: lookup by component property synonym/description
+- `bdsc relationship <query>`: lookup by component-gene relationship label
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
 - `bdsc terms <scope>`: inspect available property/relationship vocab
@@ -221,6 +229,7 @@ bdsc export properties --limit 20 --format jsonl
 - `fbid`
 - `component`
 - `property`
+- `relationship`
 - `search`
 - `auto`
 
