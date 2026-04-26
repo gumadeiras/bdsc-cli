@@ -32,10 +32,12 @@ from .core import (
     REPORT_SPECS,
     resolve_state_dir,
     search_component,
+    search_driver_family,
     search_fbid,
     search_gene,
     search_local,
     search_property,
+    search_property_exact,
     search_relationship,
     sync_datasets,
     TERM_SCOPES,
@@ -49,9 +51,15 @@ FILTER_ARGUMENTS = (
     ("component", "match component symbol"),
     ("fbid", "match FlyBase component id"),
     ("property", "match component property synonym/description"),
+    ("property-exact", "match exact component property synonym/description"),
+    ("driver-family", "match true driver family signals like GAL4/LexA/QF/FLP/split"),
     ("relationship", "match component-gene relationship"),
     ("search", "substring search across stock text"),
 )
+
+
+def _filter_dest(kind: str) -> str:
+    return f"{kind.replace('-', '_')}_filters"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -198,6 +206,26 @@ def build_parser() -> argparse.ArgumentParser:
     property_parser.add_argument("--json", action="store_true")
     property_parser.add_argument("--jsonl", action="store_true")
 
+    property_exact_parser = subparsers.add_parser(
+        "property-exact",
+        help="query stocks by exact component property synonym or description",
+    )
+    property_exact_parser.add_argument("query")
+    property_exact_parser.add_argument("--state-dir", help="cache/index directory")
+    property_exact_parser.add_argument("--limit", type=int, default=20)
+    property_exact_parser.add_argument("--json", action="store_true")
+    property_exact_parser.add_argument("--jsonl", action="store_true")
+
+    driver_family_parser = subparsers.add_parser(
+        "driver-family",
+        help="query true driver family lines like GAL4, LexA, QF, FLP, or split drivers",
+    )
+    driver_family_parser.add_argument("query")
+    driver_family_parser.add_argument("--state-dir", help="cache/index directory")
+    driver_family_parser.add_argument("--limit", type=int, default=20)
+    driver_family_parser.add_argument("--json", action="store_true")
+    driver_family_parser.add_argument("--jsonl", action="store_true")
+
     relationship_parser = subparsers.add_parser(
         "relationship", help="query stocks by component-gene relationship label"
     )
@@ -242,7 +270,7 @@ def add_filter_arguments(parser: argparse.ArgumentParser) -> None:
     for kind, help_text in FILTER_ARGUMENTS:
         parser.add_argument(
             f"--{kind}",
-            dest=f"{kind}_filters",
+            dest=_filter_dest(kind),
             action="append",
             default=[],
             help=help_text,
@@ -252,7 +280,7 @@ def add_filter_arguments(parser: argparse.ArgumentParser) -> None:
 def build_filter_criteria(args: argparse.Namespace) -> list[QueryCriterion]:
     criteria: list[QueryCriterion] = []
     for kind, _ in FILTER_ARGUMENTS:
-        for value in getattr(args, f"{kind}_filters", []):
+        for value in getattr(args, _filter_dest(kind), []):
             if value.strip():
                 criteria.append(QueryCriterion(kind=kind, query=value))
     return criteria
@@ -456,6 +484,18 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "property":
             results = search_property(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
+            return emit_query_results(args, results, formatter=format_component_results)
+
+        if args.command == "property-exact":
+            results = search_property_exact(
+                resolve_state_dir(args.state_dir), args.query, limit=args.limit
+            )
+            return emit_query_results(args, results, formatter=format_component_results)
+
+        if args.command == "driver-family":
+            results = search_driver_family(
+                resolve_state_dir(args.state_dir), args.query, limit=args.limit
+            )
             return emit_query_results(args, results, formatter=format_component_results)
 
         if args.command == "relationship":

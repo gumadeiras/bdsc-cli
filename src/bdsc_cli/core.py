@@ -60,6 +60,8 @@ LOOKUP_KINDS = (
     "fbid",
     "component",
     "property",
+    "property-exact",
+    "driver-family",
     "relationship",
     "search",
 )
@@ -78,12 +80,11 @@ REPORT_SPECS = {
         description="expression-driver and recombinase components",
         default_dataset="components",
         groups=(
-            (QueryCriterion(kind="property", query="GAL4"),),
-            (QueryCriterion(kind="property", query="lexA"),),
-            (QueryCriterion(kind="property", query="QF"),),
-            (QueryCriterion(kind="property", query="split zip hemi driver"),),
-            (QueryCriterion(kind="property", query="split intein hemi driver"),),
-            (QueryCriterion(kind="property", query="FLP recombinase"),),
+            (QueryCriterion(kind="driver-family", query="GAL4"),),
+            (QueryCriterion(kind="driver-family", query="lexA"),),
+            (QueryCriterion(kind="driver-family", query="QF"),),
+            (QueryCriterion(kind="driver-family", query="split"),),
+            (QueryCriterion(kind="driver-family", query="FLP"),),
         ),
     ),
     "optogenetics": ReportSpec(
@@ -108,6 +109,14 @@ REPORT_DATASET_SYMBOLS = {
     "components": "cc",
     "genes": "sg",
     "properties": "cc",
+}
+
+DRIVER_FAMILY_ALIASES = {
+    "gal4": ("gal4", "gawb"),
+    "lexa": ("lexa",),
+    "qf": ("qf",),
+    "flp": ("flp", "flpo", "flp recombinase"),
+    "split": ("split zip hemi driver", "split intein hemi driver"),
 }
 
 
@@ -1407,6 +1416,55 @@ def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[s
     )
 
 
+def search_property_exact(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    return _search_component_domain(
+        state_dir,
+        query,
+        limit,
+        cte_sql="""
+        WITH matching_rows AS (
+          SELECT DISTINCT bdsc_symbol_id
+          FROM compprops
+          WHERE LOWER(prop_syn) = LOWER(?)
+             OR LOWER(property_descrip) = LOWER(?)
+        )
+        """,
+        cte_params=[query, query],
+        field_names=["property_syns", "property_descriptions", "component_symbol", "gene_symbols"],
+    )
+
+
+def search_driver_family(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    _, tokens = normalize_driver_family(query)
+    clause, params = _driver_family_clause(
+        tokens,
+        "cc.component_symbol",
+        "sg.gene_symbol",
+        "cp.prop_syn",
+    )
+    return _search_component_domain(
+        state_dir,
+        query,
+        limit,
+        cte_sql=f"""
+        WITH matching_rows AS (
+          SELECT DISTINCT sg.bdsc_symbol_id
+          FROM stockgenes sg
+          JOIN component_comments cc
+            ON cc.stknum = sg.stknum
+           AND cc.component_symbol = sg.component_symbol
+          LEFT JOIN compprops cp
+            ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+          WHERE {clause}
+        )
+        """,
+        cte_params=params,
+        field_names=["component_symbol", "property_syns", "gene_symbols"],
+    )
+
+
 def search_relationship(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
     query = query.strip()
     return _search_component_domain(
@@ -1480,11 +1538,130 @@ def _contains_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
     return f"LOWER({expr}) LIKE LOWER(?)", [f"%{query}%"]
 
 
+def _exact_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
+    return f"LOWER({expr}) = LOWER(?)", [query]
+
+
+def _property_match_clause(query: str, *, exact: bool) -> tuple[str, list[Any]]:
+    synonym_clause, synonym_params = (
+        _exact_match_clause("cp.prop_syn", query)
+        if exact
+        else _prefix_match_clause("cp.prop_syn", query)
+    )
+    description_clause, description_params = (
+        _exact_match_clause("cp.property_descrip", query)
+        if exact
+        else _contains_match_clause("cp.property_descrip", query)
+    )
+    return (
+        f"({synonym_clause} OR {description_clause})",
+        synonym_params + description_params,
+    )
+
+
 def _gene_match_clause(fbgn_expr: str, gene_expr: str, query: str) -> tuple[str, list[Any]]:
     if query.upper().startswith("FBGN"):
         return f"UPPER({fbgn_expr}) = UPPER(?)", [query]
     clause, params = _prefix_match_clause(gene_expr, query)
     return clause, params
+
+
+def normalize_driver_family(query: str) -> tuple[str, tuple[str, ...]]:
+    normalized = query.strip().lower()
+    for family, aliases in DRIVER_FAMILY_ALIASES.items():
+        if normalized == family or normalized in aliases:
+            return family, aliases
+    return normalized, (normalized,)
+
+
+def _driver_family_clause(tokens: tuple[str, ...], *exprs: str) -> tuple[str, list[Any]]:
+    predicates: list[str] = []
+    params: list[Any] = []
+    for expr in exprs:
+        for token in tokens:
+            predicates.append(f"LOWER({expr}) LIKE LOWER(?)")
+            params.append(f"%{token}%")
+    return "(" + " OR ".join(predicates) + ")", params
+
+
+def _driver_family_criterion(dataset: str, query: str) -> tuple[str, list[Any], str]:
+    _, tokens = normalize_driver_family(query)
+
+    if dataset == "stocks":
+        clause, params = _driver_family_clause(
+            tokens,
+            "cc.component_symbol",
+            "cc.genotype",
+            "sg.gene_symbol",
+            "cp.prop_syn",
+        )
+        return (
+            "EXISTS ("
+            "SELECT 1 FROM component_comments cc "
+            "LEFT JOIN stockgenes sg ON sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
+            "LEFT JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+            f"WHERE cc.stknum = s.stknum AND {clause}"
+            ")",
+            params,
+            "driver-family",
+        )
+
+    if dataset == "components":
+        component_clause, component_params = _driver_family_clause(
+            tokens,
+            "cc.component_symbol",
+        )
+        gene_clause, gene_params = _driver_family_clause(tokens, "sg.gene_symbol")
+        property_clause, property_params = _driver_family_clause(tokens, "cp.prop_syn")
+        return (
+            "("
+            f"{component_clause} OR EXISTS ("
+            "SELECT 1 FROM stockgenes sg "
+            "LEFT JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+            "WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
+            f"AND ({gene_clause} OR {property_clause})"
+            ")"
+            ")",
+            component_params + gene_params + property_params,
+            "driver-family",
+        )
+
+    if dataset == "genes":
+        component_clause, component_params = _driver_family_clause(
+            tokens,
+            "sg.component_symbol",
+            "sg.gene_symbol",
+        )
+        property_clause, property_params = _driver_family_clause(tokens, "cp.prop_syn")
+        return (
+            "("
+            f"{component_clause} OR EXISTS ("
+            "SELECT 1 FROM compprops cp "
+            "WHERE cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+            f"AND {property_clause}"
+            ")"
+            ")",
+            component_params + property_params,
+            "driver-family",
+        )
+
+    component_clause, component_params = _driver_family_clause(
+        tokens,
+        "cc.component_symbol",
+        "cp.prop_syn",
+    )
+    gene_clause, gene_params = _driver_family_clause(tokens, "sg2.gene_symbol")
+    return (
+        "("
+        f"{component_clause} OR EXISTS ("
+        "SELECT 1 FROM stockgenes sg2 "
+        "WHERE sg2.stknum = cc.stknum AND sg2.component_symbol = cc.component_symbol "
+        f"AND {gene_clause}"
+        ")"
+        ")",
+        component_params + gene_params,
+        "driver-family",
+    )
 
 
 def _single_criterion(
@@ -1578,42 +1755,69 @@ def _single_criterion(
         return clause, params, resolved_kind
 
     if resolved_kind == "property":
+        clause, params = _property_match_clause(query, exact=False)
         if dataset == "stocks":
-            clause, params = _prefix_match_clause("cp.prop_syn", query)
-            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
             return (
                 "EXISTS ("
                 "SELECT 1 FROM stockgenes sg "
                 "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
-                f"WHERE sg.stknum = s.stknum AND ({clause} OR {contains_clause})"
+                f"WHERE sg.stknum = s.stknum AND {clause}"
                 ")",
-                params + contains_params,
+                params,
                 resolved_kind,
             )
         if dataset == "components":
-            clause, params = _prefix_match_clause("cp.prop_syn", query)
-            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
             return (
                 "EXISTS ("
                 "SELECT 1 FROM stockgenes sg "
                 "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
                 "WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
-                f"AND ({clause} OR {contains_clause})"
+                f"AND {clause}"
                 ")",
-                params + contains_params,
+                params,
                 resolved_kind,
             )
         if dataset == "genes":
-            clause, params = _prefix_match_clause("cp.prop_syn", query)
-            contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
             return (
-                f"EXISTS (SELECT 1 FROM compprops cp WHERE cp.bdsc_symbol_id = sg.bdsc_symbol_id AND ({clause} OR {contains_clause}))",
-                params + contains_params,
+                f"EXISTS (SELECT 1 FROM compprops cp WHERE cp.bdsc_symbol_id = sg.bdsc_symbol_id AND {clause})",
+                params,
                 resolved_kind,
             )
-        clause, params = _prefix_match_clause("cp.prop_syn", query)
-        contains_clause, contains_params = _contains_match_clause("cp.property_descrip", query)
-        return f"{clause} OR {contains_clause}", params + contains_params, resolved_kind
+        return clause, params, resolved_kind
+
+    if resolved_kind == "property-exact":
+        clause, params = _property_match_clause(query, exact=True)
+        if dataset == "stocks":
+            return (
+                "EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+                f"WHERE sg.stknum = s.stknum AND {clause}"
+                ")",
+                params,
+                resolved_kind,
+            )
+        if dataset == "components":
+            return (
+                "EXISTS ("
+                "SELECT 1 FROM stockgenes sg "
+                "JOIN compprops cp ON cp.bdsc_symbol_id = sg.bdsc_symbol_id "
+                "WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol "
+                f"AND {clause}"
+                ")",
+                params,
+                resolved_kind,
+            )
+        if dataset == "genes":
+            return (
+                f"EXISTS (SELECT 1 FROM compprops cp WHERE cp.bdsc_symbol_id = sg.bdsc_symbol_id AND {clause})",
+                params,
+                resolved_kind,
+            )
+        return clause, params, resolved_kind
+
+    if resolved_kind == "driver-family":
+        return _driver_family_criterion(dataset, query)
 
     if resolved_kind == "relationship":
         if dataset == "stocks":
@@ -1755,6 +1959,10 @@ def lookup_query(
         results = search_component(state_dir, query, limit=limit)
     elif resolved_kind == "property":
         results = search_property(state_dir, query, limit=limit)
+    elif resolved_kind == "property-exact":
+        results = search_property_exact(state_dir, query, limit=limit)
+    elif resolved_kind == "driver-family":
+        results = search_driver_family(state_dir, query, limit=limit)
     elif resolved_kind == "relationship":
         results = search_relationship(state_dir, query, limit=limit)
     elif resolved_kind == "search":
@@ -2362,7 +2570,14 @@ def format_lookup_result(result: dict[str, Any]) -> str:
         body = format_stock(rows[0] if rows else None)
     elif kind == "gene":
         body = format_gene_results(rows)
-    elif kind in {"component", "fbid", "property", "relationship"}:
+    elif kind in {
+        "component",
+        "fbid",
+        "property",
+        "property-exact",
+        "driver-family",
+        "relationship",
+    }:
         body = format_component_results(rows)
     else:
         body = format_search_results(rows)

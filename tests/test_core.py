@@ -21,10 +21,12 @@ from bdsc_cli.core import (
     lookup_query,
     QueryCriterion,
     search_component,
+    search_driver_family,
     search_fbid,
     search_gene,
     search_local,
     search_property,
+    search_property_exact,
     search_relationship,
 )
 
@@ -35,6 +37,10 @@ BLOOMINGTON = """\
 77119,"w[*]; P{10XUAS-CsChrimson}attP2","2","","1/11/2018","Donor: Janelia","red-shifted actuator"
 605642,"w[1118]; TI{lexA::p65}Or56a[KO-lexA]","2","","4/23/2026","Donor: BDSC","olfactory LexA line"
 605643,"w[1118]; P{GMR13A11-GAL4}Or67d","2","","4/24/2026","Donor: BDSC","olfactory GAL4 line"
+605644,"w[1118]; TI{lexA::p65}Or42b[KO-lexA]","2","","4/25/2026","Donor: BDSC","Or42b LexA line"
+605645,"w[1118]; P{Or42b-QF2}attP40","2","","4/25/2026","Donor: BDSC","Or42b QF line"
+605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","2","","4/25/2026","Donor: BDSC","Or42b split driver"
+605647,"w[1118]; P{Fake-GAL4}Foo/CyO","2","","4/25/2026","Donor: BDSC","multi-component GAL4 stock"
 """
 
 COMPONENTS = """\
@@ -43,6 +49,11 @@ COMPONENTS = """\
 77119,"w[*]; P{10XUAS-CsChrimson}attP2","P{10XUAS-CsChrimson}attP2","FBti0195689","","CsChrimson construct","",""
 605642,"w[1118]; TI{lexA::p65}Or56a[KO-lexA]","TI{lexA::p65}Or56a[KO-lexA]","FBti605642","","Or56a LexA knock-in","",""
 605643,"w[1118]; P{GMR13A11-GAL4}Or67d","P{GMR13A11-GAL4}Or67d","FBti605643","","Or67d GAL4 line","",""
+605644,"w[1118]; TI{lexA::p65}Or42b[KO-lexA]","TI{lexA::p65}Or42b[KO-lexA]","FBti605644","","Or42b LexA knock-in","",""
+605645,"w[1118]; P{Or42b-QF2}attP40","P{Or42b-QF2}attP40","FBti605645","","Or42b QF line","",""
+605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","P{VT012282-GAL4.DBD}attP2","FBti605646","","Or42b split driver","",""
+605647,"w[1118]; P{Fake-GAL4}Foo/CyO","P{Fake-GAL4}Foo","FBti605647","","Foo GAL4 driver","",""
+605647,"w[1118]; P{Fake-GAL4}Foo/CyO","CyO","FBab605647","","Balancer sibling","",""
 """
 
 STOCKGENES = """\
@@ -51,6 +62,10 @@ STOCKGENES = """\
 77119,"w[*]; P{10XUAS-CsChrimson}attP2","P{10XUAS-CsChrimson}attP2","CsChrimson","FBgn0000002",2,20
 605642,"w[1118]; TI{lexA::p65}Or56a[KO-lexA]","TI{lexA::p65}Or56a[KO-lexA]","Or56a","FBgn0000003",3,30
 605643,"w[1118]; P{GMR13A11-GAL4}Or67d","P{GMR13A11-GAL4}Or67d","Or67d","FBgn0000004",4,40
+605644,"w[1118]; TI{lexA::p65}Or42b[KO-lexA]","TI{lexA::p65}Or42b[KO-lexA]","Or42b","FBgn0000005",5,50
+605645,"w[1118]; P{Or42b-QF2}attP40","P{Or42b-QF2}attP40","Or42b","FBgn0000005",6,50
+605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","P{VT012282-GAL4.DBD}attP2","Or42b","FBgn0000005",7,50
+605647,"w[1118]; P{Fake-GAL4}Foo/CyO","P{Fake-GAL4}Foo","Foo","FBgn0000006",8,60
 """
 
 COMPGENES = """\
@@ -59,6 +74,10 @@ COMPGENES = """\
 2,20,100,"coding"
 3,30,100,"coding"
 4,40,100,"coding"
+5,50,100,"coding"
+6,50,100,"coding"
+7,50,100,"coding"
+8,60,100,"coding"
 """
 
 COMPPROPS = """\
@@ -69,6 +88,10 @@ COMPPROPS = """\
 3,301,"olfactory receptor","olfactory"
 4,400,"GAL4 driver","gal4"
 4,401,"olfactory receptor","olfactory"
+5,500,"This component is a lexA-bearing insertion that could potentially report expression of nearby genes.","lexA reporter - putative"
+6,600,"This components is a transgene carrying QF","QF"
+7,700,"This component expresses leucine zipper-based hemi driver of either the DNA-binding or activation domain of GAL4, QF, p65, lexA etc for use in DBDzip and ADzip combination.","split zip hemi driver"
+8,800,"GAL4 driver","GAL4"
 """
 
 
@@ -95,7 +118,7 @@ class CoreTests(unittest.TestCase):
 
     def test_build_index_and_search(self) -> None:
         counts = build_index(self.state_dir)
-        self.assertEqual(counts["stocks"], 4)
+        self.assertEqual(counts["stocks"], 8)
         results = search_local(self.state_dir, "Chronos")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["stknum"], 77118)
@@ -120,7 +143,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(fuzzy_results[0]["gene_symbol"], "Chronos")
         status = get_status(self.state_dir)
         self.assertTrue(status["db_exists"])
-        self.assertEqual(status["index"]["counts"]["stocks"], 4)
+        self.assertEqual(status["index"]["counts"]["stocks"], 8)
 
     def test_component_fbid_and_rrid_queries(self) -> None:
         build_index(self.state_dir)
@@ -171,11 +194,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(results[0]["property_syns"], "opto")
         fuzzy_results = search_property(self.state_dir, "optogen")
         self.assertEqual(fuzzy_results[0]["property_descriptions"], "optogenetic")
+        noisy_lexa = search_property(self.state_dir, "lexA")
+        self.assertEqual({row["stknum"] for row in noisy_lexa}, {605642, 605644, 605646})
+        exact_lexa = search_property_exact(self.state_dir, "lexA")
+        self.assertEqual({row["stknum"] for row in exact_lexa}, {605642})
+        family_lexa = search_driver_family(self.state_dir, "lexA")
+        self.assertEqual({row["stknum"] for row in family_lexa}, {605642, 605644})
+        family_qf = search_driver_family(self.state_dir, "QF")
+        self.assertEqual({row["stknum"] for row in family_qf}, {605645})
+        family_gal4_components = {row["component_symbol"] for row in search_driver_family(self.state_dir, "GAL4")}
+        self.assertIn("P{Fake-GAL4}Foo", family_gal4_components)
+        self.assertNotIn("CyO", family_gal4_components)
 
     def test_relationship_search(self) -> None:
         build_index(self.state_dir)
         results = search_relationship(self.state_dir, "coding")
-        self.assertEqual(len(results), 4)
+        self.assertEqual(len(results), 8)
         self.assertEqual(results[0]["gene_relationships"], "coding")
         fuzzy_results = search_relationship(self.state_dir, "codng")
         self.assertEqual(fuzzy_results[0]["gene_relationships"], "coding")
@@ -206,7 +240,16 @@ class CoreTests(unittest.TestCase):
         relationships = list(
             iter_export_rows(self.state_dir, "genes", query="coding", kind="relationship")
         )
-        self.assertEqual(len(relationships), 4)
+        self.assertEqual(len(relationships), 8)
+
+        exact_lexa = list(
+            iter_export_rows(self.state_dir, "components", query="lexA", kind="property-exact")
+        )
+        self.assertEqual({row["stknum"] for row in exact_lexa}, {605642})
+        family_lexa = list(
+            iter_export_rows(self.state_dir, "components", query="lexA", kind="driver-family")
+        )
+        self.assertEqual({row["stknum"] for row in family_lexa}, {605642, 605644})
 
     def test_compound_filter_rows(self) -> None:
         build_index(self.state_dir)
@@ -260,7 +303,11 @@ class CoreTests(unittest.TestCase):
         build_index(self.state_dir)
         result = lookup_query(self.state_dir, "coding", kind="relationship")
         self.assertEqual(result["kind"], "relationship")
-        self.assertEqual(result["result_count"], 4)
+        self.assertEqual(result["result_count"], 8)
+        exact_property = lookup_query(self.state_dir, "lexA", kind="property-exact")
+        self.assertEqual({row["stknum"] for row in exact_property["results"]}, {605642})
+        family = lookup_query(self.state_dir, "qf", kind="driver-family")
+        self.assertEqual({row["stknum"] for row in family["results"]}, {605645})
 
     def test_filter_command_json(self) -> None:
         build_index(self.state_dir)
@@ -281,13 +328,46 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("605642", stdout.getvalue())
 
+    def test_exact_property_and_driver_family_commands(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "property-exact",
+                    "lexA",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("605642", stdout.getvalue())
+        self.assertNotIn("605644", stdout.getvalue())
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "driver-family",
+                    "qf",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("605645", stdout.getvalue())
+        self.assertNotIn("605646", stdout.getvalue())
+
     def test_canned_reports(self) -> None:
         build_index(self.state_dir)
         olfactory = list(iter_report_rows(self.state_dir, "olfactory", dataset="components"))
-        self.assertEqual({row["stknum"] for row in olfactory}, {605642, 605643})
+        self.assertEqual({row["stknum"] for row in olfactory}, {605642, 605643, 605644, 605645})
 
         drivers = list(iter_report_rows(self.state_dir, "drivers", dataset="components"))
-        self.assertEqual({row["stknum"] for row in drivers}, {605642, 605643})
+        self.assertEqual({row["stknum"] for row in drivers}, {605642, 605643, 605644, 605645, 605646, 605647})
+        self.assertNotIn("CyO", {row["component_symbol"] for row in drivers})
 
         optogenetics = list(iter_report_rows(self.state_dir, "optogenetics", dataset="components"))
         self.assertEqual({row["stknum"] for row in optogenetics}, {77118, 77119})
