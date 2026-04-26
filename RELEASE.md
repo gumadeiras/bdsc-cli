@@ -48,8 +48,19 @@ git push origin vX.Y.Z
 After the GitHub release exists:
 
 ```bash
-python scripts/render_homebrew_formula.py dist/bdsc_cli-X.Y.Z.tar.gz --output /tmp/bdsc-cli.rb
+curl -L -o /tmp/bdsc_cli-X.Y.Z.tar.gz \
+  https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc_cli-X.Y.Z.tar.gz
+python scripts/render_homebrew_formula.py /tmp/bdsc_cli-X.Y.Z.tar.gz --output /tmp/bdsc-cli.rb
 ```
 
 Then commit the rendered formula into the tap repo with the matching release
 version and sha256.
+
+## PyPI Trusted Publisher
+
+If the PyPI publish job fails with `invalid-publisher`, add a trusted
+publisher on PyPI with these claims:
+
+- owner/repo: `gumadeiras/bdsc-cli`
+- workflow: `.github/workflows/release.yml`
+- environment: `pypi`

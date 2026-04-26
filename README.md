@@ -22,10 +22,31 @@ No third-party Python dependencies.
 
 ## Install
 
-Preferred: `pipx`
+Another computer:
 
 ```bash
-pipx install git+https://github.com/gumadeiras/bdsc-cli.git
+brew tap gumadeiras/tap
+brew install bdsc-cli
+```
+
+Or install the release wheel directly with `pipx`:
+
+```bash
+pipx install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.0/bdsc_cli-0.2.0-py3-none-any.whl'
+```
+
+Or with plain `pip`:
+
+```bash
+python3 -m pip install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.0/bdsc_cli-0.2.0-py3-none-any.whl'
+```
+
+Source install:
+
+```bash
+git clone https://github.com/gumadeiras/bdsc-cli.git
+cd bdsc-cli
+python3 -m pip install .
 ```
 
 Repo-local dev install:
@@ -55,6 +76,12 @@ print(__version__)
 PY
 ).tar.gz
 ```
+
+PyPI note:
+
+- the GitHub release is live
+- PyPI trusted publishing is not configured yet for `bdsc-cli`
+- `pip install bdsc-cli` will work after that publisher is added
 
 ## Quickstart
 
