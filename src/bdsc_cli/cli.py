@@ -57,9 +57,33 @@ FILTER_ARGUMENTS = (
     ("search", "substring search across stock text"),
 )
 
+LEGACY_HELP = argparse.SUPPRESS
+
 
 def _filter_dest(kind: str) -> str:
     return f"{kind.replace('-', '_')}_filters"
+
+
+def add_json_flags(parser: argparse.ArgumentParser, *, jsonl: bool = True) -> None:
+    parser.add_argument("--json", action="store_true")
+    if jsonl:
+        parser.add_argument("--jsonl", action="store_true")
+
+
+def add_query_parser(
+    subparsers,
+    name: str,
+    help_text: str,
+    *,
+    jsonl: bool = True,
+    hidden: bool = False,
+):
+    parser = subparsers.add_parser(name, help=LEGACY_HELP if hidden else help_text)
+    parser.add_argument("query")
+    parser.add_argument("--state-dir", help="cache/index directory")
+    parser.add_argument("--limit", type=int, default=20)
+    add_json_flags(parser, jsonl=jsonl)
+    return parser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -152,92 +176,92 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="show local dataset/index status for the current state dir"
     )
     status_parser.add_argument("--state-dir", help="cache/index directory")
+    add_json_flags(status_parser, jsonl=False)
 
-    search_parser = subparsers.add_parser("search", help="query the local SQLite index")
-    search_parser.add_argument("query")
-    search_parser.add_argument("--state-dir", help="cache/index directory")
-    search_parser.add_argument("--limit", type=int, default=10)
-    search_parser.add_argument("--json", action="store_true")
-    search_parser.add_argument("--jsonl", action="store_true")
-
-    gene_parser = subparsers.add_parser(
-        "gene", help="query stocks by gene symbol or FBgn identifier"
+    find_parser = subparsers.add_parser(
+        "find",
+        help="primary query command; free-text lookup or structured compound filters",
     )
-    gene_parser.add_argument("query")
-    gene_parser.add_argument("--state-dir", help="cache/index directory")
-    gene_parser.add_argument("--limit", type=int, default=20)
-    gene_parser.add_argument("--json", action="store_true")
-    gene_parser.add_argument("--jsonl", action="store_true")
-
-    component_parser = subparsers.add_parser(
-        "component", help="query stocks by component symbol"
+    find_parser.add_argument("query", nargs="?")
+    find_parser.add_argument("--state-dir", help="cache/index directory")
+    find_parser.add_argument("--limit", type=int, default=20)
+    find_parser.add_argument(
+        "--kind",
+        choices=LOOKUP_KINDS,
+        default="auto",
+        help="interpret the positional query as this lookup kind",
     )
-    component_parser.add_argument("query")
-    component_parser.add_argument("--state-dir", help="cache/index directory")
-    component_parser.add_argument("--limit", type=int, default=20)
-    component_parser.add_argument("--json", action="store_true")
-    component_parser.add_argument("--jsonl", action="store_true")
-
-    fbid_parser = subparsers.add_parser(
-        "fbid", help="query stocks by FlyBase component identifier"
+    find_parser.add_argument(
+        "--dataset",
+        choices=EXPORT_DATASETS,
+        help="return normalized rows for this dataset instead of auto-shaped lookup output",
     )
-    fbid_parser.add_argument("query")
-    fbid_parser.add_argument("--state-dir", help="cache/index directory")
-    fbid_parser.add_argument("--limit", type=int, default=20)
-    fbid_parser.add_argument("--json", action="store_true")
-    fbid_parser.add_argument("--jsonl", action="store_true")
+    add_filter_arguments(find_parser)
+    add_json_flags(find_parser)
+
+    add_query_parser(
+        subparsers,
+        "search",
+        "query the local SQLite index",
+        hidden=True,
+    ).set_defaults(limit=10)
+    add_query_parser(
+        subparsers,
+        "gene",
+        "query stocks by gene symbol or FBgn identifier",
+        hidden=True,
+    )
+    add_query_parser(
+        subparsers,
+        "component",
+        "query stocks by component symbol",
+        hidden=True,
+    )
+    add_query_parser(
+        subparsers,
+        "fbid",
+        "query stocks by FlyBase component identifier",
+        hidden=True,
+    )
 
     stock_parser = subparsers.add_parser("stock", help="show local details for one stock")
     stock_parser.add_argument("stknum", type=int)
     stock_parser.add_argument("--state-dir", help="cache/index directory")
-    stock_parser.add_argument("--json", action="store_true")
+    add_json_flags(stock_parser, jsonl=False)
 
-    rrid_parser = subparsers.add_parser("rrid", help="show local details for one RRID:BDSC_*")
+    rrid_parser = subparsers.add_parser("rrid", help=LEGACY_HELP)
     rrid_parser.add_argument("query")
     rrid_parser.add_argument("--state-dir", help="cache/index directory")
-    rrid_parser.add_argument("--json", action="store_true")
+    add_json_flags(rrid_parser, jsonl=False)
 
-    property_parser = subparsers.add_parser(
-        "property", help="query stocks by component property synonym or description"
+    add_query_parser(
+        subparsers,
+        "property",
+        "query stocks by component property synonym or description",
+        hidden=True,
     )
-    property_parser.add_argument("query")
-    property_parser.add_argument("--state-dir", help="cache/index directory")
-    property_parser.add_argument("--limit", type=int, default=20)
-    property_parser.add_argument("--json", action="store_true")
-    property_parser.add_argument("--jsonl", action="store_true")
-
-    property_exact_parser = subparsers.add_parser(
+    add_query_parser(
+        subparsers,
         "property-exact",
-        help="query stocks by exact component property synonym or description",
+        "query stocks by exact component property synonym or description",
+        hidden=True,
     )
-    property_exact_parser.add_argument("query")
-    property_exact_parser.add_argument("--state-dir", help="cache/index directory")
-    property_exact_parser.add_argument("--limit", type=int, default=20)
-    property_exact_parser.add_argument("--json", action="store_true")
-    property_exact_parser.add_argument("--jsonl", action="store_true")
-
-    driver_family_parser = subparsers.add_parser(
+    add_query_parser(
+        subparsers,
         "driver-family",
-        help="query true driver family lines like GAL4, LexA, QF, FLP, or split drivers",
+        "query true driver family lines like GAL4, LexA, QF, FLP, or split drivers",
+        hidden=True,
     )
-    driver_family_parser.add_argument("query")
-    driver_family_parser.add_argument("--state-dir", help="cache/index directory")
-    driver_family_parser.add_argument("--limit", type=int, default=20)
-    driver_family_parser.add_argument("--json", action="store_true")
-    driver_family_parser.add_argument("--jsonl", action="store_true")
-
-    relationship_parser = subparsers.add_parser(
-        "relationship", help="query stocks by component-gene relationship label"
+    add_query_parser(
+        subparsers,
+        "relationship",
+        "query stocks by component-gene relationship label",
+        hidden=True,
     )
-    relationship_parser.add_argument("query")
-    relationship_parser.add_argument("--state-dir", help="cache/index directory")
-    relationship_parser.add_argument("--limit", type=int, default=20)
-    relationship_parser.add_argument("--json", action="store_true")
-    relationship_parser.add_argument("--jsonl", action="store_true")
 
     lookup_parser = subparsers.add_parser(
         "lookup",
-        help="auto-detect query kind; supports batch args or file/stdin input",
+        help=LEGACY_HELP,
     )
     lookup_parser.add_argument("queries", nargs="*")
     lookup_parser.add_argument("--state-dir", help="cache/index directory")
@@ -247,16 +271,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         help="read newline-delimited queries from a file path or '-' for stdin",
     )
-    lookup_parser.add_argument("--json", action="store_true")
-    lookup_parser.add_argument("--jsonl", action="store_true")
+    add_json_flags(lookup_parser)
 
     live_parser = subparsers.add_parser(
-        "live-search", help="hit BDSC's current live search endpoint directly"
+        "live-search", help=LEGACY_HELP
     )
     live_parser.add_argument("query")
     live_parser.add_argument("--limit", type=int, default=10)
-    live_parser.add_argument("--json", action="store_true")
-    live_parser.add_argument("--jsonl", action="store_true")
+    add_json_flags(live_parser)
 
     return parser
 
@@ -324,6 +346,22 @@ def emit_stock_result(args: argparse.Namespace, stock: object) -> int:
     return 0 if stock else 1
 
 
+def emit_lookup_payload(args: argparse.Namespace, results: list[dict]) -> int:
+    if args.json:
+        print(
+            json.dumps(
+                results[0] if len(results) == 1 else results,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+    elif args.jsonl:
+        print_jsonl(results)
+    else:
+        print("\n\n".join(format_lookup_result(result) for result in results))
+    return 0 if all(result["results"] for result in results) else 1
+
+
 def load_queries(positional_queries: list[str], input_path: str | None) -> list[str]:
     queries = [query for query in positional_queries if query.strip()]
     if input_path:
@@ -364,13 +402,70 @@ def emit_export_rows(
             handle.close()
 
 
+QUERY_COMMAND_SPECS = {
+    "search": (search_local, format_search_results),
+    "gene": (search_gene, format_gene_results),
+    "component": (search_component, format_component_results),
+    "fbid": (search_fbid, format_component_results),
+    "property": (search_property, format_component_results),
+    "property-exact": (search_property_exact, format_component_results),
+    "driver-family": (search_driver_family, format_component_results),
+    "relationship": (search_relationship, format_component_results),
+}
+
+
+def run_find(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    query = (args.query or "").strip()
+    criteria = build_filter_criteria(args)
+    if not query and not criteria:
+        parser.error("find requires a query or at least one filter flag")
+
+    state_dir = resolve_state_dir(args.state_dir)
+    if query and not criteria and not args.dataset:
+        return emit_lookup_payload(
+            args,
+            [lookup_query(state_dir, query, kind=args.kind, limit=args.limit)],
+        )
+
+    rows = list(
+        iter_export_rows(
+            state_dir,
+            args.dataset or "components",
+            limit=args.limit,
+            criteria=criteria,
+            query=query or None,
+            kind=args.kind,
+        )
+    )
+    emit_output(
+        rows,
+        as_json=args.json,
+        as_jsonl=args.jsonl,
+        formatter=lambda payload: format_dataset_results(args.dataset or "components", payload),
+    )
+    return 0 if rows else 1
+
+
+def run_legacy_lookup(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    queries = load_queries(args.queries, args.input)
+    if not queries:
+        parser.error("lookup requires at least one query or --input")
+    state_dir = resolve_state_dir(args.state_dir)
+    lookup_results = [
+        lookup_query(state_dir, query, kind=args.kind, limit=args.limit)
+        for query in queries
+    ]
+    return emit_lookup_payload(args, lookup_results)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
+        state_dir = resolve_state_dir(getattr(args, "state_dir", None))
+
         if args.command == "sync":
-            state_dir = resolve_state_dir(args.state_dir)
             results = sync_datasets(state_dir, force=args.force)
             print(format_sync_results(results))
             if not args.skip_index:
@@ -379,7 +474,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "build-index":
-            state_dir = resolve_state_dir(args.state_dir)
             counts = build_index(state_dir)
             print(json.dumps({"indexed": counts, "state_dir": str(state_dir)}, indent=2))
             return 0
@@ -387,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export":
             emit_export_rows(
                 iter_export_rows(
-                    resolve_state_dir(args.state_dir),
+                    state_dir,
                     args.dataset,
                     limit=args.limit,
                     criteria=build_filter_criteria(args),
@@ -402,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "report":
             rows = list(
                 iter_report_rows(
-                    resolve_state_dir(args.state_dir),
+                    state_dir,
                     args.name,
                     dataset=args.dataset,
                     limit=args.limit,
@@ -423,7 +517,7 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("filter requires at least one filter flag")
             rows = list(
                 iter_export_rows(
-                    resolve_state_dir(args.state_dir),
+                    state_dir,
                     args.dataset,
                     limit=args.limit,
                     criteria=criteria,
@@ -437,9 +531,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0 if rows else 1
 
+        if args.command == "find":
+            return run_find(parser, args)
+
         if args.command == "terms":
             results = list_terms(
-                resolve_state_dir(args.state_dir),
+                state_dir,
                 args.scope,
                 query=args.query,
                 limit=args.limit,
@@ -453,79 +550,24 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "status":
-            print(json.dumps(get_status(resolve_state_dir(args.state_dir)), indent=2))
+            print(json.dumps(get_status(state_dir), indent=2, ensure_ascii=False))
             return 0
 
-        if args.command == "search":
-            results = search_local(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            return emit_query_results(args, results, formatter=format_search_results)
-
-        if args.command == "gene":
-            results = search_gene(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            return emit_query_results(args, results, formatter=format_gene_results)
-
-        if args.command == "component":
-            results = search_component(
-                resolve_state_dir(args.state_dir), args.query, limit=args.limit
-            )
-            return emit_query_results(args, results, formatter=format_component_results)
-
-        if args.command == "fbid":
-            results = search_fbid(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            return emit_query_results(args, results, formatter=format_component_results)
+        if args.command in QUERY_COMMAND_SPECS:
+            query_fn, formatter = QUERY_COMMAND_SPECS[args.command]
+            results = query_fn(state_dir, args.query, limit=args.limit)
+            return emit_query_results(args, results, formatter=formatter)
 
         if args.command == "stock":
-            stock = get_stock(resolve_state_dir(args.state_dir), args.stknum)
+            stock = get_stock(state_dir, args.stknum)
             return emit_stock_result(args, stock)
 
         if args.command == "rrid":
-            stock = get_stock_by_rrid(resolve_state_dir(args.state_dir), args.query)
+            stock = get_stock_by_rrid(state_dir, args.query)
             return emit_stock_result(args, stock)
 
-        if args.command == "property":
-            results = search_property(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            return emit_query_results(args, results, formatter=format_component_results)
-
-        if args.command == "property-exact":
-            results = search_property_exact(
-                resolve_state_dir(args.state_dir), args.query, limit=args.limit
-            )
-            return emit_query_results(args, results, formatter=format_component_results)
-
-        if args.command == "driver-family":
-            results = search_driver_family(
-                resolve_state_dir(args.state_dir), args.query, limit=args.limit
-            )
-            return emit_query_results(args, results, formatter=format_component_results)
-
-        if args.command == "relationship":
-            results = search_relationship(
-                resolve_state_dir(args.state_dir), args.query, limit=args.limit
-            )
-            return emit_query_results(args, results, formatter=format_component_results)
-
         if args.command == "lookup":
-            queries = load_queries(args.queries, args.input)
-            if not queries:
-                parser.error("lookup requires at least one query or --input")
-            state_dir = resolve_state_dir(args.state_dir)
-            lookup_results = [
-                lookup_query(state_dir, query, kind=args.kind, limit=args.limit)
-                for query in queries
-            ]
-            if args.json:
-                print(
-                    json.dumps(
-                        lookup_results[0] if len(lookup_results) == 1 else lookup_results,
-                        indent=2,
-                        ensure_ascii=False,
-                    )
-                )
-            elif args.jsonl:
-                print_jsonl(lookup_results)
-            else:
-                print("\n\n".join(format_lookup_result(result) for result in lookup_results))
-            return 0 if all(result["results"] for result in lookup_results) else 1
+            return run_legacy_lookup(parser, args)
 
         if args.command == "live-search":
             results = live_search(args.query, limit=args.limit)

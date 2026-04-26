@@ -328,6 +328,65 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("605642", stdout.getvalue())
 
+    def test_find_command_lookup_mode(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "find",
+                    "Chronis",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = stdout.getvalue()
+        self.assertIn('"kind": "gene"', payload)
+        self.assertIn('"Chronos"', payload)
+
+    def test_find_command_filter_mode(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "find",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--gene",
+                    "Or56a",
+                    "--property-exact",
+                    "lexA",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = stdout.getvalue()
+        self.assertIn("605642", payload)
+        self.assertNotIn("605644", payload)
+
+    def test_find_command_dataset_override(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "find",
+                    "Or42b",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--dataset",
+                    "genes",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = stdout.getvalue()
+        self.assertIn('"gene_symbol": "Or42b"', payload)
+        self.assertNotIn('"kind"', payload)
+
     def test_exact_property_and_driver_family_commands(self) -> None:
         build_index(self.state_dir)
         stdout = io.StringIO()
@@ -359,6 +418,14 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("605645", stdout.getvalue())
         self.assertNotIn("605646", stdout.getvalue())
+
+    def test_status_command_json_flag(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["status", "--state-dir", str(self.state_dir), "--json"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"db_exists": true', stdout.getvalue())
 
     def test_canned_reports(self) -> None:
         build_index(self.state_dir)

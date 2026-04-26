@@ -67,19 +67,13 @@ bdsc sync
 Then query it:
 
 ```bash
-bdsc search Chronos
-bdsc gene Chronos
+bdsc find Chronos
+bdsc find 'Or56a Lexa'
 bdsc report optogenetics
-bdsc filter --gene Or56a --property lexA
-bdsc filter --gene Or42b --driver-family lexA
-bdsc component 'P{10XUAS-Chronos'
-bdsc fbid FBti0195688
-bdsc rrid RRID:BDSC_77118
-bdsc property VALIUM20
-bdsc property-exact lexA
-bdsc driver-family QF
-bdsc lookup Chronos
-printf 'Chronos\nFBti0195688\n' | bdsc lookup --input - --jsonl
+bdsc find --gene Or56a --property lexA
+bdsc find --gene Or42b --driver-family lexA
+bdsc find RRID:BDSC_77118
+bdsc find FBti0195688
 bdsc stock 77118
 ```
 
@@ -97,74 +91,23 @@ Sync datasets and build the local index:
 bdsc sync
 ```
 
-Search locally:
+Use `find` for nearly all interactive querying:
 
 ```bash
-bdsc search Chronos
-bdsc search Chronis
-bdsc search 'Or56a Lexa'
-bdsc search FBgn0003996 --json
-bdsc search Chronos --jsonl
-```
-
-Inspect one stock:
-
-```bash
-bdsc stock 77118
-bdsc stock 77118 --json
-```
-
-Hit the live BDSC search endpoint directly:
-
-```bash
-bdsc live-search Chronos
-```
-
-Query by gene symbol or FBgn:
-
-```bash
-bdsc gene Chronos
-bdsc gene Chronis
-bdsc gene FBgn0003996 --json
-```
-
-Query by component symbol, FlyBase component id, or RRID:
-
-```bash
-bdsc component 'P{10XUAS-Chronos'
-bdsc component 'Or56a Lexa'
-bdsc fbid FBti0195688
-bdsc rrid RRID:BDSC_77118
-```
-
-Query by component property:
-
-```bash
-bdsc property VALIUM20
-bdsc property optogen
-bdsc property 'guide RNA'
-bdsc property-exact lexA
-bdsc driver-family lexA
-bdsc driver-family QF
-```
-
-Query by component-gene relationship:
-
-```bash
-bdsc relationship RNAi
-bdsc relationship codng
-bdsc relationship coding
-```
-
-Use compound AND filters when one field is not enough:
-
-```bash
-bdsc filter --gene Or56a --property lexA
-bdsc filter --gene Or67d --property qf --json
-bdsc filter --gene Or42b --driver-family lexA
-bdsc filter --gene Or42b --driver-family qf
-bdsc filter --gene Or56a --property-exact lexA
-bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
+bdsc find Chronos
+bdsc find Chronis
+bdsc find 'Or56a Lexa'
+bdsc find FBgn0003996 --json
+bdsc find RRID:BDSC_77118
+bdsc find FBti0195688
+bdsc find --kind property VALIUM20
+bdsc find --kind property-exact lexA
+bdsc find --kind driver-family QF
+bdsc find --kind relationship RNAi
+bdsc find --gene Or56a --property lexA
+bdsc find --gene Or42b --driver-family lexA
+bdsc find --gene Or42b --driver-family qf
+bdsc find --dataset genes --property olfactory --relationship coding --jsonl
 ```
 
 Use canned reports for common retrieval buckets:
@@ -192,10 +135,9 @@ Structured output for scripts or agents:
 
 ```bash
 bdsc status --json
-bdsc search Chronos --jsonl
-bdsc gene FBgn0003996 --json
-bdsc lookup Chronos FBti0195688 --json
-bdsc filter --gene Or56a --property lexA --json
+bdsc find Chronos --json
+bdsc find FBgn0003996 --dataset genes --json
+bdsc find --gene Or56a --property lexA --json
 bdsc export components --limit 5 --format jsonl
 bdsc stock 77118 --json
 ```
@@ -205,26 +147,16 @@ bdsc stock 77118 --json
 - `bdsc sync`: download the BDSC CSV datasets; builds the index by default
 - `bdsc build-index`: rebuild the SQLite index from previously downloaded CSVs
 - `bdsc status`: show local dataset freshness and index metadata
-- `bdsc search <query>`: local full-text search
-- `bdsc gene <query>`: exact/fuzzy lookup by gene symbol or FBgn
-- `bdsc component <query>`: exact/fuzzy lookup by component symbol
-- `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
-- `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
-- `bdsc property <query>`: exact/fuzzy lookup by component property synonym/description
-- `bdsc property-exact <query>`: strict property synonym/description lookup
-- `bdsc driver-family <query>`: semantic driver-family lookup for `GAL4`, `LexA`, `QF`, `FLP`, `split`
-- `bdsc relationship <query>`: exact/fuzzy lookup by component-gene relationship label
-- `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
-- `bdsc filter`: compound AND filters across normalized datasets
+- `bdsc find [query]`: primary query command; free-text lookup or compound filters
 - `bdsc report <name>`: canned reports for `olfactory`, `drivers`, `optogenetics`
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
 - `bdsc terms <scope>`: inspect available property/relationship vocab
 - `bdsc stock <stknum>`: local stock details
-- `bdsc live-search <query>`: direct POST to BDSC's live search endpoint
+- legacy compatibility shims still exist for `search`, `gene`, `component`, `fbid`, `rrid`, `property`, `property-exact`, `driver-family`, `relationship`, `lookup`, `filter`, `live-search`
 
-## Batch Lookup
+## Find
 
-Use `lookup` when the caller does not want to choose the query command up
+Use `find` when the caller does not want to choose a dedicated query command up
 front.
 
 Auto-detect rules:
@@ -240,12 +172,12 @@ Auto-detect rules:
 Examples:
 
 ```bash
-bdsc lookup Chronos
-bdsc lookup RRID:BDSC_77118
-bdsc lookup --kind component 'P{10XUAS-Chronos'
-bdsc lookup --kind property VALIUM20
-bdsc lookup --input queries.txt --json
-printf 'Chronos\nRRID:BDSC_77118\nFBti0195688\n' | bdsc lookup --input - --jsonl
+bdsc find Chronos
+bdsc find RRID:BDSC_77118
+bdsc find --kind component 'P{10XUAS-Chronos'
+bdsc find --kind property VALIUM20
+bdsc find --kind property-exact lexA
+bdsc find --kind driver-family qf
 ```
 
 ## Export
@@ -305,18 +237,17 @@ AND:
 
 ## Filter
 
-Use `filter` for human-facing compound queries without choosing a single lookup
-kind up front. Default dataset: `components`.
+`find` also subsumes compound filters. Default dataset: `components`.
 
 Examples:
 
 ```bash
-bdsc filter --gene Or56a --property lexA
-bdsc filter --gene Or67d --property qf
-bdsc filter --gene Or42b --driver-family lexA
-bdsc filter --gene Or56a --property-exact lexA
-bdsc filter --dataset stocks --property optogenetic
-bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
+bdsc find --gene Or56a --property lexA
+bdsc find --gene Or67d --property qf
+bdsc find --gene Or42b --driver-family lexA
+bdsc find --gene Or56a --property-exact lexA
+bdsc find --dataset stocks --property optogenetic
+bdsc find --dataset genes --property olfactory --relationship coding --jsonl
 ```
 
 ## Reports
@@ -367,8 +298,10 @@ bdsc terms property-descriptions --query optogenetic --jsonl
 - `search` now uses a two-stage index: exact/prefix FTS first, trigram fuzzy
   fallback second. Typos and loose spacing/punctuation usually still find the
   intended stock without having the exact BDSC string.
-- direct query commands (`gene`, `component`, `property`, `relationship`) also
-  rerank fuzzy candidates when exact/prefix matching misses.
+- `find` is the intended interactive entrypoint; dedicated legacy query
+  commands still work but are no longer the main documented path.
+- direct lookup paths also rerank fuzzy candidates when exact/prefix matching
+  misses.
 - use `property-exact` or `driver-family` when `property` is too broad for a
   reliable LexA/QF/GAL4-style answer.
 - tag pushes like `v0.1.0` run the release workflow: build artifacts, create a
