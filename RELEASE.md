@@ -29,11 +29,11 @@ PY
 
 1. Commit release-ready changes.
 2. Push `main`.
-3. Create and push a tag like `v0.1.0`.
+3. Create and push a tag like `vX.Y.Z`.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 ## What Happens
@@ -48,7 +48,7 @@ git push origin v0.1.0
 After the GitHub release exists:
 
 ```bash
-python scripts/render_homebrew_formula.py dist/bdsc_cli-0.1.0.tar.gz --output /tmp/bdsc-cli.rb
+python scripts/render_homebrew_formula.py dist/bdsc_cli-X.Y.Z.tar.gz --output /tmp/bdsc-cli.rb
 ```
 
 Then commit the rendered formula into the tap repo with the matching release
