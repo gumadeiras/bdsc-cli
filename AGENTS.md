@@ -49,7 +49,7 @@ Prefer:
 - `export` for normalized rows
 
 Examples:
-- batch lookup:
+- primary lookup:
   - `.venv/bin/bdsc find Chronos --json`
 - export normalized subsets:
   - `.venv/bin/bdsc export components --gene Or56a --property lexA --format jsonl`

@@ -58,6 +58,21 @@ FILTER_ARGUMENTS = (
 )
 
 LEGACY_HELP = argparse.SUPPRESS
+LEGACY_COMMANDS = {
+    "filter",
+    "search",
+    "gene",
+    "component",
+    "fbid",
+    "rrid",
+    "property",
+    "property-exact",
+    "driver-family",
+    "relationship",
+    "lookup",
+    "live-search",
+}
+PUBLIC_COMMAND_METAVAR = "{sync,build-index,export,report,terms,status,find,stock}"
 
 
 def _filter_dest(kind: str) -> str:
@@ -86,10 +101,22 @@ def add_query_parser(
     return parser
 
 
+def hide_legacy_commands(subparsers_action) -> None:
+    subparsers_action._choices_actions = [
+        action
+        for action in subparsers_action._choices_actions
+        if action.dest not in LEGACY_COMMANDS
+    ]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bdsc", description="Sync and query BDSC data")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar=PUBLIC_COMMAND_METAVAR,
+    )
 
     sync_parser = subparsers.add_parser("sync", help="download public BDSC CSV datasets")
     sync_parser.add_argument("--state-dir", help="cache/index directory")
@@ -147,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     filter_parser = subparsers.add_parser(
         "filter",
-        help="compound AND filters across normalized datasets",
+        help=LEGACY_HELP,
     )
     filter_parser.add_argument(
         "--dataset",
@@ -280,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     live_parser.add_argument("--limit", type=int, default=10)
     add_json_flags(live_parser)
 
+    hide_legacy_commands(subparsers)
     return parser
 
 

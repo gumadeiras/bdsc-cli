@@ -427,6 +427,17 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn('"db_exists": true', stdout.getvalue())
 
+    def test_top_level_help_hides_legacy_commands(self) -> None:
+        stdout = io.StringIO()
+        with self.assertRaises(SystemExit) as exc:
+            with contextlib.redirect_stdout(stdout):
+                main(["--help"])
+        self.assertEqual(exc.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("find", help_text)
+        self.assertNotIn("==SUPPRESS==", help_text)
+        self.assertNotIn("live-search", help_text)
+
     def test_canned_reports(self) -> None:
         build_index(self.state_dir)
         olfactory = list(iter_report_rows(self.state_dir, "olfactory", dataset="components"))

@@ -128,7 +128,7 @@ Use a custom cache/index location:
 
 ```bash
 bdsc sync --state-dir ./data
-bdsc search Chronos --state-dir ./data
+bdsc find Chronos --state-dir ./data
 ```
 
 Structured output for scripts or agents:
@@ -207,7 +207,7 @@ bdsc export genes --format csv --output genes.csv
 bdsc export properties --limit 20 --format jsonl
 ```
 
-`export --query` uses the same lookup kinds as `lookup`:
+`export --query` uses the same lookup kinds as `find --kind`:
 
 - `stock`
 - `rrid`
@@ -235,7 +235,7 @@ AND:
 - `--relationship`
 - `--search`
 
-## Filter
+## Compound Find
 
 `find` also subsumes compound filters. Default dataset: `components`.
 
@@ -304,7 +304,7 @@ bdsc terms property-descriptions --query optogenetic --jsonl
   misses.
 - use `property-exact` or `driver-family` when `property` is too broad for a
   reliable LexA/QF/GAL4-style answer.
-- tag pushes like `v0.1.0` run the release workflow: build artifacts, create a
+- tag pushes like `vX.Y.Z` run the release workflow: build artifacts, create a
   GitHub release, and publish to PyPI.
 - `scripts/render_homebrew_formula.py` renders a Homebrew formula from a built
   sdist; use it when updating a tap after a release.
