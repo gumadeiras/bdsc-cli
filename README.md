@@ -43,6 +43,19 @@ Check the CLI:
 bdsc --help
 ```
 
+Build release artifacts locally:
+
+```bash
+python -m pip install -e .[release]
+python -m build
+python -m twine check dist/*
+python scripts/render_homebrew_formula.py dist/bdsc_cli-$(python - <<'PY'
+from bdsc_cli import __version__
+print(__version__)
+PY
+).tar.gz
+```
+
 ## Quickstart
 
 Create a local cache and index:
@@ -338,6 +351,10 @@ bdsc terms property-descriptions --query optogenetic --jsonl
   intended stock without having the exact BDSC string.
 - direct query commands (`gene`, `component`, `property`, `relationship`) also
   rerank fuzzy candidates when exact/prefix matching misses.
+- tag pushes like `v0.1.0` run the release workflow: build artifacts, create a
+  GitHub release, and publish to PyPI.
+- `scripts/render_homebrew_formula.py` renders a Homebrew formula from a built
+  sdist; use it when updating a tap after a release.
 - The live endpoint is undocumented and may change without notice.
 - BDSC data is large enough that the first full sync/index can take a few
   minutes depending on network and disk speed.
