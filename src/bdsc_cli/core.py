@@ -103,6 +103,13 @@ REPORT_SPECS = {
     ),
 }
 
+REPORT_DATASET_SYMBOLS = {
+    "stocks": "s",
+    "components": "cc",
+    "genes": "sg",
+    "properties": "cc",
+}
+
 
 def resolve_state_dir(value: str | Path | None) -> Path:
     return Path(value).expanduser() if value else DEFAULT_STATE_DIR
@@ -990,6 +997,22 @@ def _score_field_match(query: str, text: str) -> float:
     return score
 
 
+def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    return [dict(row) for row in rows]
+
+
+def _default_row_key(row: sqlite3.Row) -> tuple[Any, ...]:
+    return tuple(row[key] for key in row.keys())
+
+
+def _component_result_key(row: sqlite3.Row | dict[str, Any]) -> tuple[Any, ...]:
+    return (row["stknum"], row["component_symbol"], row["fbid"])
+
+
+def _gene_result_key(row: sqlite3.Row | dict[str, Any]) -> tuple[Any, ...]:
+    return (row["stknum"], row["component_symbol"], row["gene_symbol"], row["fbgn"])
+
+
 def _rank_direct_rows(
     query: str,
     rows: list[sqlite3.Row],
@@ -1006,7 +1029,7 @@ def _rank_direct_rows(
             scored.append({"row": row, "score": row_score})
 
     if key_fn is None:
-        key_fn = lambda row: tuple(row[key] for key in row.keys())
+        key_fn = _default_row_key
     ranked = _merge_ranked_matches(scored, key_fn)
     return [dict(item["row"]) for item in ranked[:limit]]
 
@@ -1090,7 +1113,7 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
                 (query, f"{query}%", query, limit),
             ).fetchall()
         if rows:
-            return [dict(row) for row in rows]
+            return _rows_to_dicts(rows)
 
         stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
         if not stock_ids:
@@ -1114,12 +1137,7 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
             fuzzy_rows,
             field_names=["gene_symbol", "fbgn"],
             limit=limit,
-            key_fn=lambda row: (
-                row["stknum"],
-                row["component_symbol"],
-                row["gene_symbol"],
-                row["fbgn"],
-            ),
+            key_fn=_gene_result_key,
         )
     finally:
         conn.close()
@@ -1229,7 +1247,7 @@ def _search_component_table(
             (query, f"{query}%", query, limit),
         ).fetchall()
         if rows:
-            return [dict(row) for row in rows]
+            return _rows_to_dicts(rows)
 
         stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
         if not stock_ids:
@@ -1261,7 +1279,7 @@ def _search_component_table(
             fuzzy_rows,
             field_names=field_names,
             limit=limit,
-            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
+            key_fn=_component_result_key,
         )
     finally:
         if close_conn:
@@ -1336,8 +1354,15 @@ def _fetch_component_domain_rows(
         stock_ids,
     ).fetchall()
 
-
-def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def _search_component_domain(
+    state_dir: Path,
+    query: str,
+    limit: int,
+    *,
+    cte_sql: str,
+    cte_params: list[Any],
+    field_names: list[str],
+) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
@@ -1348,58 +1373,57 @@ def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[s
             conn,
             query,
             limit,
-            cte_sql="""
-            WITH matching_rows AS (
-              SELECT DISTINCT bdsc_symbol_id
-              FROM compprops
-              WHERE LOWER(prop_syn) = LOWER(?)
-                 OR LOWER(prop_syn) LIKE LOWER(?)
-                 OR LOWER(property_descrip) LIKE LOWER(?)
-            )
-            """,
-            cte_params=[query, f"{query}%", f"%{query}%"],
+            cte_sql=cte_sql,
+            cte_params=cte_params,
         )
         return _rank_direct_rows(
             query,
             rows,
-            field_names=["property_syns", "property_descriptions", "component_symbol", "gene_symbols"],
+            field_names=field_names,
             limit=limit,
-            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
+            key_fn=_component_result_key,
         )
     finally:
         conn.close()
+
+
+def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    query = query.strip()
+    return _search_component_domain(
+        state_dir,
+        query,
+        limit,
+        cte_sql="""
+        WITH matching_rows AS (
+          SELECT DISTINCT bdsc_symbol_id
+          FROM compprops
+          WHERE LOWER(prop_syn) = LOWER(?)
+             OR LOWER(prop_syn) LIKE LOWER(?)
+             OR LOWER(property_descrip) LIKE LOWER(?)
+        )
+        """,
+        cte_params=[query, f"{query}%", f"%{query}%"],
+        field_names=["property_syns", "property_descriptions", "component_symbol", "gene_symbols"],
+    )
 
 
 def search_relationship(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
     query = query.strip()
-    if not query:
-        return []
-
-    conn = _connect(state_dir)
-    try:
-        rows = _fetch_component_domain_rows(
-            conn,
-            query,
-            limit,
-            cte_sql="""
-            WITH matching_rows AS (
-              SELECT DISTINCT bdsc_symbol_id
-              FROM compgenes
-              WHERE LOWER(prop_syn) = LOWER(?)
-                 OR LOWER(prop_syn) LIKE LOWER(?)
-            )
-            """,
-            cte_params=[query, f"{query}%"],
+    return _search_component_domain(
+        state_dir,
+        query,
+        limit,
+        cte_sql="""
+        WITH matching_rows AS (
+          SELECT DISTINCT bdsc_symbol_id
+          FROM compgenes
+          WHERE LOWER(prop_syn) = LOWER(?)
+             OR LOWER(prop_syn) LIKE LOWER(?)
         )
-        return _rank_direct_rows(
-            query,
-            rows,
-            field_names=["gene_relationships", "gene_symbols", "component_symbol", "property_syns"],
-            limit=limit,
-            key_fn=lambda row: (row["stknum"], row["component_symbol"], row["fbid"]),
-        )
-    finally:
-        conn.close()
+        """,
+        cte_params=[query, f"{query}%"],
+        field_names=["gene_relationships", "gene_symbols", "component_symbol", "property_syns"],
+    )
 
 
 def resolve_rrid_to_stknum(query: str) -> int | None:
@@ -2080,26 +2104,28 @@ def _report_olfactory_where(dataset: str) -> str:
             "WHERE EXISTS (SELECT 1 FROM component_comments cc "
             f"WHERE cc.stknum = s.stknum AND ({component_clause}))"
         )
+    symbol = REPORT_DATASET_SYMBOLS.get(dataset)
+    if symbol is None:
+        raise ValueError(f"unsupported report dataset: {dataset}")
+    return f"WHERE {component_clause.replace('component_symbol', f'{symbol}.component_symbol')}"
+
+
+def _report_row_key(dataset: str, row: dict[str, Any]) -> tuple[Any, ...]:
+    if dataset == "stocks":
+        return (row["stknum"],)
     if dataset == "components":
-        return f"WHERE {component_clause.replace('component_symbol', 'cc.component_symbol')}"
+        return _component_result_key(row)
     if dataset == "genes":
-        return f"WHERE {component_clause.replace('component_symbol', 'sg.component_symbol')}"
+        return _gene_result_key(row)
     if dataset == "properties":
-        return f"WHERE {component_clause.replace('component_symbol', 'cc.component_symbol')}"
+        return (row["stknum"], row["component_symbol"], row["property_id"], row["prop_syn"])
     raise ValueError(f"unsupported report dataset: {dataset}")
 
 
 def _merge_report_rows(dataset: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
     for row in rows:
-        if dataset == "stocks":
-            key = (row["stknum"],)
-        elif dataset == "components":
-            key = (row["stknum"], row["component_symbol"], row["fbid"])
-        elif dataset == "genes":
-            key = (row["stknum"], row["component_symbol"], row["gene_symbol"], row["fbgn"])
-        else:
-            key = (row["stknum"], row["component_symbol"], row["property_id"], row["prop_syn"])
+        key = _report_row_key(dataset, row)
         deduped.setdefault(key, row)
     return list(deduped.values())
 
@@ -2113,8 +2139,8 @@ def iter_report_rows(
 ) -> Iterator[dict[str, Any]]:
     if report_name not in REPORT_NAMES:
         raise ValueError(f"unsupported report: {report_name}")
-    spec = REPORT_SPECS.get(report_name)
-    resolved_dataset = dataset or (spec.default_dataset if spec else "components")
+    spec = REPORT_SPECS[report_name]
+    resolved_dataset = dataset or spec.default_dataset
 
     if report_name == "olfactory":
         yield from iter_dataset_rows(
@@ -2125,8 +2151,6 @@ def iter_report_rows(
         )
         return
 
-    assert spec is not None
-    per_group_limit = limit if limit is not None else None
     merged_rows: list[dict[str, Any]] = []
     for group in spec.groups:
         rows = list(
@@ -2134,7 +2158,7 @@ def iter_report_rows(
                 state_dir,
                 resolved_dataset,
                 criteria=list(group),
-                limit=per_group_limit,
+                limit=limit,
             )
         )
         merged_rows.extend(rows)

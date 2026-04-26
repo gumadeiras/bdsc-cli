@@ -276,6 +276,26 @@ def emit_output(
     print(formatter(payload))
 
 
+def emit_query_results(
+    args: argparse.Namespace,
+    results,
+    *,
+    formatter,
+) -> int:
+    emit_output(
+        results,
+        as_json=args.json,
+        as_jsonl=args.jsonl,
+        formatter=formatter,
+    )
+    return 0
+
+
+def emit_stock_result(args: argparse.Namespace, stock: object) -> int:
+    emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
+    return 0 if stock else 1
+
+
 def load_queries(positional_queries: list[str], input_path: str | None) -> list[str]:
     queries = [query for query in positional_queries if query.strip()]
     if input_path:
@@ -360,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
                     limit=args.limit,
                 )
             )
-            report_dataset = args.dataset or REPORT_SPECS.get(args.name, None).default_dataset
+            report_dataset = args.dataset or REPORT_SPECS[args.name].default_dataset
             emit_output(
                 rows,
                 as_json=args.json,
@@ -410,77 +430,39 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "search":
             results = search_local(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_search_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_search_results)
 
         if args.command == "gene":
             results = search_gene(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_gene_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_gene_results)
 
         if args.command == "component":
             results = search_component(
                 resolve_state_dir(args.state_dir), args.query, limit=args.limit
             )
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_component_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_component_results)
 
         if args.command == "fbid":
             results = search_fbid(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_component_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_component_results)
 
         if args.command == "stock":
             stock = get_stock(resolve_state_dir(args.state_dir), args.stknum)
-            emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
-            return 0 if stock else 1
+            return emit_stock_result(args, stock)
 
         if args.command == "rrid":
             stock = get_stock_by_rrid(resolve_state_dir(args.state_dir), args.query)
-            emit_output(stock, as_json=args.json, as_jsonl=False, formatter=format_stock)
-            return 0 if stock else 1
+            return emit_stock_result(args, stock)
 
         if args.command == "property":
             results = search_property(resolve_state_dir(args.state_dir), args.query, limit=args.limit)
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_component_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_component_results)
 
         if args.command == "relationship":
             results = search_relationship(
                 resolve_state_dir(args.state_dir), args.query, limit=args.limit
             )
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_component_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_component_results)
 
         if args.command == "lookup":
             queries = load_queries(args.queries, args.input)
@@ -507,13 +489,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "live-search":
             results = live_search(args.query, limit=args.limit)
-            emit_output(
-                results,
-                as_json=args.json,
-                as_jsonl=args.jsonl,
-                formatter=format_search_results,
-            )
-            return 0
+            return emit_query_results(args, results, formatter=format_search_results)
 
         parser.error(f"unknown command: {args.command}")
         return 2
