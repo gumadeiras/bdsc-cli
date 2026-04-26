@@ -13,6 +13,7 @@ from bdsc_cli.core import (
     build_index,
     detect_query_kind,
     iter_export_rows,
+    iter_report_rows,
     list_terms,
     get_status,
     get_stock,
@@ -279,6 +280,35 @@ class CoreTests(unittest.TestCase):
             )
         self.assertEqual(exit_code, 0)
         self.assertIn("605642", stdout.getvalue())
+
+    def test_canned_reports(self) -> None:
+        build_index(self.state_dir)
+        olfactory = list(iter_report_rows(self.state_dir, "olfactory", dataset="components"))
+        self.assertEqual({row["stknum"] for row in olfactory}, {605642, 605643})
+
+        drivers = list(iter_report_rows(self.state_dir, "drivers", dataset="components"))
+        self.assertEqual({row["stknum"] for row in drivers}, {605642, 605643})
+
+        optogenetics = list(iter_report_rows(self.state_dir, "optogenetics", dataset="components"))
+        self.assertEqual({row["stknum"] for row in optogenetics}, {77118, 77119})
+
+    def test_report_command_json(self) -> None:
+        build_index(self.state_dir)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "report",
+                    "olfactory",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--dataset",
+                    "genes",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Or56a", stdout.getvalue())
 
 
 if __name__ == "__main__":

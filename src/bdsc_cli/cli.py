@@ -22,11 +22,14 @@ from .core import (
     get_stock,
     get_stock_by_rrid,
     iter_export_rows,
+    iter_report_rows,
     list_terms,
     live_search,
     LOOKUP_KINDS,
     lookup_query,
     QueryCriterion,
+    REPORT_NAMES,
+    REPORT_SPECS,
     resolve_state_dir,
     search_component,
     search_fbid,
@@ -94,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help="output path; defaults to stdout",
     )
+
+    report_parser = subparsers.add_parser(
+        "report",
+        help="canned reports for common BDSC retrieval tasks",
+    )
+    report_parser.add_argument("name", choices=REPORT_NAMES)
+    report_parser.add_argument(
+        "--dataset",
+        choices=EXPORT_DATASETS,
+        help="override the report's default dataset",
+    )
+    report_parser.add_argument("--state-dir", help="cache/index directory")
+    report_parser.add_argument("--limit", type=int, default=20)
+    report_parser.add_argument("--json", action="store_true")
+    report_parser.add_argument("--jsonl", action="store_true")
 
     filter_parser = subparsers.add_parser(
         "filter",
@@ -332,6 +350,24 @@ def main(argv: list[str] | None = None) -> int:
                 output_path=args.output,
             )
             return 0
+
+        if args.command == "report":
+            rows = list(
+                iter_report_rows(
+                    resolve_state_dir(args.state_dir),
+                    args.name,
+                    dataset=args.dataset,
+                    limit=args.limit,
+                )
+            )
+            report_dataset = args.dataset or REPORT_SPECS.get(args.name, None).default_dataset
+            emit_output(
+                rows,
+                as_json=args.json,
+                as_jsonl=args.jsonl,
+                formatter=lambda payload: format_dataset_results(report_dataset, payload),
+            )
+            return 0 if rows else 1
 
         if args.command == "filter":
             criteria = build_filter_criteria(args)

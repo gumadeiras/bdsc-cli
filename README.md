@@ -56,6 +56,7 @@ Then query it:
 ```bash
 bdsc search Chronos
 bdsc gene Chronos
+bdsc report optogenetics
 bdsc filter --gene Or56a --property lexA
 bdsc component 'P{10XUAS-Chronos'
 bdsc fbid FBti0195688
@@ -144,6 +145,14 @@ bdsc filter --gene Or67d --property qf --json
 bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
 ```
 
+Use canned reports for common retrieval buckets:
+
+```bash
+bdsc report olfactory
+bdsc report drivers --jsonl
+bdsc report optogenetics --limit 50
+```
+
 Inspect cache/index status:
 
 ```bash
@@ -183,6 +192,7 @@ bdsc stock 77118 --json
 - `bdsc relationship <query>`: exact/fuzzy lookup by component-gene relationship label
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc filter`: compound AND filters across normalized datasets
+- `bdsc report <name>`: canned reports for `olfactory`, `drivers`, `optogenetics`
 - `bdsc export <dataset>`: stream normalized rows as `jsonl`, `csv`, or `tsv`
 - `bdsc terms <scope>`: inspect available property/relationship vocab
 - `bdsc stock <stknum>`: local stock details
@@ -276,6 +286,26 @@ bdsc filter --gene Or56a --property lexA
 bdsc filter --gene Or67d --property qf
 bdsc filter --dataset stocks --property optogenetic
 bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
+```
+
+## Reports
+
+Use `report` for curated high-level buckets that would otherwise need multiple
+queries or OR filters.
+
+Reports:
+
+- `olfactory`: receptor-family genes (`Or*`, `Orco`, `Ir*`, `Obp*`)
+- `drivers`: GAL4 / lexA / QF / split-driver / FLP-like driver surfaces
+- `optogenetics`: common optogenetic effectors plus optogenetic-tagged properties
+
+Examples:
+
+```bash
+bdsc report olfactory
+bdsc report olfactory --dataset genes --jsonl
+bdsc report drivers --limit 50 --json
+bdsc report optogenetics --dataset components --jsonl
 ```
 
 ## Terms

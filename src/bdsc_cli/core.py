@@ -44,6 +44,14 @@ class QueryCriterion:
     query: str
 
 
+@dataclass(frozen=True)
+class ReportSpec:
+    name: str
+    description: str
+    default_dataset: str
+    groups: tuple[tuple[QueryCriterion, ...], ...] = ()
+
+
 LOOKUP_KINDS = (
     "auto",
     "stock",
@@ -57,6 +65,43 @@ LOOKUP_KINDS = (
 )
 EXPORT_DATASETS = ("stocks", "components", "genes", "properties")
 TERM_SCOPES = ("properties", "property-descriptions", "relationships")
+REPORT_NAMES = ("olfactory", "drivers", "optogenetics")
+
+REPORT_SPECS = {
+    "olfactory": ReportSpec(
+        name="olfactory",
+        description="olfactory receptor and odorant-binding gene families",
+        default_dataset="components",
+    ),
+    "drivers": ReportSpec(
+        name="drivers",
+        description="expression-driver and recombinase components",
+        default_dataset="components",
+        groups=(
+            (QueryCriterion(kind="property", query="GAL4"),),
+            (QueryCriterion(kind="property", query="lexA"),),
+            (QueryCriterion(kind="property", query="QF"),),
+            (QueryCriterion(kind="property", query="split zip hemi driver"),),
+            (QueryCriterion(kind="property", query="split intein hemi driver"),),
+            (QueryCriterion(kind="property", query="FLP recombinase"),),
+        ),
+    ),
+    "optogenetics": ReportSpec(
+        name="optogenetics",
+        description="common optogenetic effectors and optogenetic-tagged components",
+        default_dataset="components",
+        groups=(
+            (QueryCriterion(kind="gene", query="Chronos"),),
+            (QueryCriterion(kind="gene", query="CsChrimson"),),
+            (QueryCriterion(kind="gene", query="Chrimson"),),
+            (QueryCriterion(kind="gene", query="GtACR"),),
+            (QueryCriterion(kind="gene", query="ReaChR"),),
+            (QueryCriterion(kind="gene", query="ChR2"),),
+            (QueryCriterion(kind="gene", query="eNpHR"),),
+            (QueryCriterion(kind="property", query="optogen"),),
+        ),
+    ),
+}
 
 
 def resolve_state_dir(value: str | Path | None) -> Path:
@@ -1866,110 +1911,118 @@ def get_status(state_dir: Path) -> dict[str, Any]:
     }
 
 
-def iter_export_rows(
+def _dataset_sort_clause(dataset: str) -> str:
+    if dataset == "stocks":
+        return "ORDER BY s.stknum"
+    if dataset == "components":
+        return "ORDER BY cc.stknum, cc.component_symbol"
+    if dataset == "genes":
+        return "ORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol, sg.fbgn"
+    if dataset == "properties":
+        return "ORDER BY cc.stknum, cc.component_symbol, cp.prop_syn, cp.property_id"
+    raise ValueError(f"unsupported export dataset: {dataset}")
+
+
+def _dataset_select_sql(dataset: str) -> str:
+    if dataset == "stocks":
+        return """
+            SELECT
+              s.stknum,
+              'RRID:BDSC_' || s.stknum AS rrid,
+              s.genotype,
+              s.chromosomes,
+              s.aka,
+              s.date_added,
+              s.donor_info,
+              s.stock_comments,
+              COALESCE(sd.component_symbols, '') AS component_symbols,
+              COALESCE(sd.gene_symbols, '') AS gene_symbols,
+              COALESCE(sd.fbgns, '') AS fbgns
+            FROM stocks s
+            LEFT JOIN search_documents sd ON sd.stknum = s.stknum
+        """
+    if dataset == "components":
+        return f"""
+            SELECT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cc.mapstatement,
+              cc.comment1,
+              cc.comment2,
+              cc.comment3,
+              {_component_metadata_subqueries(
+                  "cc.stknum",
+                  "cc.component_symbol",
+                  "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
+              )}
+            FROM component_comments cc
+        """
+    if dataset == "genes":
+        return """
+            SELECT DISTINCT
+              sg.stknum,
+              sg.genotype,
+              sg.component_symbol,
+              cc.fbid,
+              sg.gene_symbol,
+              sg.fbgn,
+              sg.bdsc_symbol_id,
+              sg.bdsc_gene_id,
+              COALESCE((
+                SELECT group_concat(prop_syn, ' | ')
+                FROM (
+                  SELECT DISTINCT cg.prop_syn AS prop_syn
+                  FROM compgenes cg
+                  WHERE cg.bdsc_symbol_id = sg.bdsc_symbol_id
+                    AND cg.bdsc_gene_id = sg.bdsc_gene_id
+                    AND cg.prop_syn != ''
+                  ORDER BY cg.prop_syn
+                )
+              ), '') AS gene_relationships
+            FROM stockgenes sg
+            LEFT JOIN component_comments cc
+              ON cc.stknum = sg.stknum
+             AND cc.component_symbol = sg.component_symbol
+        """
+    if dataset == "properties":
+        return """
+            SELECT DISTINCT
+              cc.stknum,
+              cc.genotype,
+              cc.component_symbol,
+              cc.fbid,
+              cp.property_id,
+              cp.prop_syn,
+              cp.property_descrip
+            FROM component_comments cc
+            JOIN stockgenes sg
+              ON sg.stknum = cc.stknum
+             AND sg.component_symbol = cc.component_symbol
+            JOIN compprops cp
+              ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
+        """
+    raise ValueError(f"unsupported export dataset: {dataset}")
+
+
+def iter_dataset_rows(
     state_dir: Path,
     dataset: str,
     *,
+    where_clause: str = "",
+    params: tuple[Any, ...] = (),
     limit: int | None = None,
-    criteria: list[QueryCriterion] | None = None,
-    query: str | None = None,
-    kind: str = "auto",
 ) -> Iterator[dict[str, Any]]:
     if dataset not in EXPORT_DATASETS:
         raise ValueError(f"unsupported export dataset: {dataset}")
 
     conn = _connect(state_dir)
     try:
-        where_clause, params = _compose_where_clause(
-            dataset,
-            criteria,
-            query=query,
-            kind=kind,
-        )
-
-        if dataset == "stocks":
-            sql = """
-                SELECT
-                  s.stknum,
-                  'RRID:BDSC_' || s.stknum AS rrid,
-                  s.genotype,
-                  s.chromosomes,
-                  s.aka,
-                  s.date_added,
-                  s.donor_info,
-                  s.stock_comments,
-                  COALESCE(sd.component_symbols, '') AS component_symbols,
-                  COALESCE(sd.gene_symbols, '') AS gene_symbols,
-                  COALESCE(sd.fbgns, '') AS fbgns
-                FROM stocks s
-                LEFT JOIN search_documents sd ON sd.stknum = s.stknum
-            """
-            sql += f"\n{where_clause}\nORDER BY s.stknum"
-        elif dataset == "components":
-            sql = f"""
-                SELECT
-                  cc.stknum,
-                  cc.genotype,
-                  cc.component_symbol,
-                  cc.fbid,
-                  cc.mapstatement,
-                  cc.comment1,
-                  cc.comment2,
-                  cc.comment3,
-                  {_component_metadata_subqueries(
-                      "cc.stknum",
-                      "cc.component_symbol",
-                      "(SELECT MIN(sg.bdsc_symbol_id) FROM stockgenes sg WHERE sg.stknum = cc.stknum AND sg.component_symbol = cc.component_symbol)",
-                  )}
-                FROM component_comments cc
-            """
-            sql += f"\n{where_clause}\nORDER BY cc.stknum, cc.component_symbol"
-        elif dataset == "genes":
-            sql = """
-                SELECT DISTINCT
-                  sg.stknum,
-                  sg.genotype,
-                  sg.component_symbol,
-                  cc.fbid,
-                  sg.gene_symbol,
-                  sg.fbgn,
-                  sg.bdsc_symbol_id,
-                  sg.bdsc_gene_id,
-                  COALESCE((
-                    SELECT group_concat(prop_syn, ' | ')
-                    FROM (
-                      SELECT DISTINCT cg.prop_syn AS prop_syn
-                      FROM compgenes cg
-                      WHERE cg.bdsc_symbol_id = sg.bdsc_symbol_id
-                        AND cg.bdsc_gene_id = sg.bdsc_gene_id
-                        AND cg.prop_syn != ''
-                      ORDER BY cg.prop_syn
-                    )
-                  ), '') AS gene_relationships
-                FROM stockgenes sg
-                LEFT JOIN component_comments cc
-                  ON cc.stknum = sg.stknum
-                 AND cc.component_symbol = sg.component_symbol
-            """
-            sql += f"\n{where_clause}\nORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol, sg.fbgn"
-        else:
-            sql = """
-                SELECT DISTINCT
-                  cc.stknum,
-                  cc.genotype,
-                  cc.component_symbol,
-                  cc.fbid,
-                  cp.property_id,
-                  cp.prop_syn,
-                  cp.property_descrip
-                FROM component_comments cc
-                JOIN stockgenes sg
-                  ON sg.stknum = cc.stknum
-                 AND sg.component_symbol = cc.component_symbol
-                JOIN compprops cp
-                  ON cp.bdsc_symbol_id = sg.bdsc_symbol_id
-            """
-            sql += f"\n{where_clause}\nORDER BY cc.stknum, cc.component_symbol, cp.prop_syn, cp.property_id"
+        sql = _dataset_select_sql(dataset)
+        if where_clause:
+            sql += f"\n{where_clause}"
+        sql += f"\n{_dataset_sort_clause(dataset)}"
 
         if limit is not None:
             sql += "\nLIMIT ?"
@@ -1989,6 +2042,110 @@ def iter_export_rows(
             cursor.close()
     finally:
         conn.close()
+
+
+def iter_export_rows(
+    state_dir: Path,
+    dataset: str,
+    *,
+    limit: int | None = None,
+    criteria: list[QueryCriterion] | None = None,
+    query: str | None = None,
+    kind: str = "auto",
+) -> Iterator[dict[str, Any]]:
+    where_clause, params = _compose_where_clause(
+        dataset,
+        criteria,
+        query=query,
+        kind=kind,
+    )
+    yield from iter_dataset_rows(
+        state_dir,
+        dataset,
+        where_clause=where_clause,
+        params=tuple(params),
+        limit=limit,
+    )
+
+
+def _report_olfactory_where(dataset: str) -> str:
+    component_clause = (
+        "component_symbol GLOB '*Or[0-9]*' "
+        "OR component_symbol GLOB '*Orco*' "
+        "OR component_symbol GLOB '*Ir[0-9]*' "
+        "OR component_symbol GLOB '*Obp[0-9]*'"
+    )
+    if dataset == "stocks":
+        return (
+            "WHERE EXISTS (SELECT 1 FROM component_comments cc "
+            f"WHERE cc.stknum = s.stknum AND ({component_clause}))"
+        )
+    if dataset == "components":
+        return f"WHERE {component_clause.replace('component_symbol', 'cc.component_symbol')}"
+    if dataset == "genes":
+        return f"WHERE {component_clause.replace('component_symbol', 'sg.component_symbol')}"
+    if dataset == "properties":
+        return f"WHERE {component_clause.replace('component_symbol', 'cc.component_symbol')}"
+    raise ValueError(f"unsupported report dataset: {dataset}")
+
+
+def _merge_report_rows(dataset: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        if dataset == "stocks":
+            key = (row["stknum"],)
+        elif dataset == "components":
+            key = (row["stknum"], row["component_symbol"], row["fbid"])
+        elif dataset == "genes":
+            key = (row["stknum"], row["component_symbol"], row["gene_symbol"], row["fbgn"])
+        else:
+            key = (row["stknum"], row["component_symbol"], row["property_id"], row["prop_syn"])
+        deduped.setdefault(key, row)
+    return list(deduped.values())
+
+
+def iter_report_rows(
+    state_dir: Path,
+    report_name: str,
+    *,
+    dataset: str | None = None,
+    limit: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    if report_name not in REPORT_NAMES:
+        raise ValueError(f"unsupported report: {report_name}")
+    spec = REPORT_SPECS.get(report_name)
+    resolved_dataset = dataset or (spec.default_dataset if spec else "components")
+
+    if report_name == "olfactory":
+        yield from iter_dataset_rows(
+            state_dir,
+            resolved_dataset,
+            where_clause=_report_olfactory_where(resolved_dataset),
+            limit=limit,
+        )
+        return
+
+    assert spec is not None
+    per_group_limit = limit if limit is not None else None
+    merged_rows: list[dict[str, Any]] = []
+    for group in spec.groups:
+        rows = list(
+            iter_export_rows(
+                state_dir,
+                resolved_dataset,
+                criteria=list(group),
+                limit=per_group_limit,
+            )
+        )
+        merged_rows.extend(rows)
+        if limit is not None and len(_merge_report_rows(resolved_dataset, merged_rows)) >= limit:
+            break
+
+    deduped = _merge_report_rows(resolved_dataset, merged_rows)
+    if limit is not None:
+        deduped = deduped[:limit]
+    for row in deduped:
+        yield row
 
 
 def list_terms(
