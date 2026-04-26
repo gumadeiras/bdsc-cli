@@ -32,11 +32,15 @@ Notes:
   - `.venv/bin/bdsc gene Chronis --json`
   - `.venv/bin/bdsc component 'Or56a Lexa' --json`
   - `.venv/bin/bdsc property optogen --json`
+  - `.venv/bin/bdsc property-exact lexA --json`
+  - `.venv/bin/bdsc driver-family qf --json`
   - `.venv/bin/bdsc relationship codng --json`
 - one mixed query, auto-detect:
   - `.venv/bin/bdsc lookup RRID:BDSC_77118 --json`
 - compound filters:
   - `.venv/bin/bdsc filter --gene Or56a --property lexA --json`
+  - `.venv/bin/bdsc filter --gene Or42b --driver-family lexA --json`
+  - `.venv/bin/bdsc filter --gene Or56a --property-exact lexA --json`
   - `.venv/bin/bdsc filter --dataset genes --property olfactory --relationship coding --jsonl`
 
 ## Machine Consumption
@@ -51,6 +55,7 @@ Examples:
   - `printf 'Chronos\nFBti0195688\n' | .venv/bin/bdsc lookup --input - --jsonl`
 - export normalized subsets:
   - `.venv/bin/bdsc export components --gene Or56a --property lexA --format jsonl`
+  - `.venv/bin/bdsc export components --gene Or42b --driver-family qf --format jsonl`
   - `.venv/bin/bdsc export genes --property olfactory --relationship coding --format jsonl`
 
 Datasets:
@@ -73,14 +78,17 @@ Use this order:
 
 1. `terms` if you do not know the controlled vocabulary
 2. `gene` / `component` / `property` / `relationship` for typed intent
-3. `filter` for intersections
-4. `export ... --format jsonl` for downstream agent processing
-5. `search` when the term is messy, partial, or typo-prone
-6. `live-search` only for site-current behavior
+3. `property-exact` / `driver-family` when `property` is too noisy
+4. `filter` for intersections
+5. `export ... --format jsonl` for downstream agent processing
+6. `search` when the term is messy, partial, or typo-prone
+7. `live-search` only for site-current behavior
 
 ## Expectations
 
 - `search` and direct query commands are typo-tolerant, not semantic search
 - exact matches should rank first; fuzzy fallback broadens recall
+- `property` is broad; prefer `property-exact` or `driver-family` for
+  trustworthy LexA/QF/GAL4-family answers
 - BDSC data is large; keep agent prompts/results scoped with `--limit`
 - use `filter` or `export` instead of post-filtering raw prose output

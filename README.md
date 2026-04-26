@@ -71,10 +71,13 @@ bdsc search Chronos
 bdsc gene Chronos
 bdsc report optogenetics
 bdsc filter --gene Or56a --property lexA
+bdsc filter --gene Or42b --driver-family lexA
 bdsc component 'P{10XUAS-Chronos'
 bdsc fbid FBti0195688
 bdsc rrid RRID:BDSC_77118
 bdsc property VALIUM20
+bdsc property-exact lexA
+bdsc driver-family QF
 bdsc lookup Chronos
 printf 'Chronos\nFBti0195688\n' | bdsc lookup --input - --jsonl
 bdsc stock 77118
@@ -140,6 +143,9 @@ Query by component property:
 bdsc property VALIUM20
 bdsc property optogen
 bdsc property 'guide RNA'
+bdsc property-exact lexA
+bdsc driver-family lexA
+bdsc driver-family QF
 ```
 
 Query by component-gene relationship:
@@ -155,6 +161,9 @@ Use compound AND filters when one field is not enough:
 ```bash
 bdsc filter --gene Or56a --property lexA
 bdsc filter --gene Or67d --property qf --json
+bdsc filter --gene Or42b --driver-family lexA
+bdsc filter --gene Or42b --driver-family qf
+bdsc filter --gene Or56a --property-exact lexA
 bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
 ```
 
@@ -202,6 +211,8 @@ bdsc stock 77118 --json
 - `bdsc fbid <query>`: exact/prefix lookup by FlyBase component identifier
 - `bdsc rrid <query>`: exact lookup by `RRID:BDSC_*`
 - `bdsc property <query>`: exact/fuzzy lookup by component property synonym/description
+- `bdsc property-exact <query>`: strict property synonym/description lookup
+- `bdsc driver-family <query>`: semantic driver-family lookup for `GAL4`, `LexA`, `QF`, `FLP`, `split`
 - `bdsc relationship <query>`: exact/fuzzy lookup by component-gene relationship label
 - `bdsc lookup ...`: auto-detect query kind; supports multiple args or `--input`
 - `bdsc filter`: compound AND filters across normalized datasets
@@ -257,6 +268,7 @@ bdsc export genes --query Chronos --kind gene
 bdsc export components --query FBti0195688 --kind fbid --format jsonl
 bdsc export properties --query VALIUM20 --kind property --format tsv
 bdsc export components --gene Or56a --property lexA --format jsonl
+bdsc export components --gene Or42b --driver-family qf --format jsonl
 bdsc export genes --property olfactory --relationship coding --format csv
 bdsc export components --format tsv --output components.tsv
 bdsc export genes --format csv --output genes.csv
@@ -271,6 +283,8 @@ bdsc export properties --limit 20 --format jsonl
 - `fbid`
 - `component`
 - `property`
+- `property-exact`
+- `driver-family`
 - `relationship`
 - `search`
 - `auto`
@@ -284,6 +298,8 @@ AND:
 - `--component`
 - `--fbid`
 - `--property`
+- `--property-exact`
+- `--driver-family`
 - `--relationship`
 - `--search`
 
@@ -297,6 +313,8 @@ Examples:
 ```bash
 bdsc filter --gene Or56a --property lexA
 bdsc filter --gene Or67d --property qf
+bdsc filter --gene Or42b --driver-family lexA
+bdsc filter --gene Or56a --property-exact lexA
 bdsc filter --dataset stocks --property optogenetic
 bdsc filter --dataset genes --property olfactory --relationship coding --jsonl
 ```
@@ -351,6 +369,8 @@ bdsc terms property-descriptions --query optogenetic --jsonl
   intended stock without having the exact BDSC string.
 - direct query commands (`gene`, `component`, `property`, `relationship`) also
   rerank fuzzy candidates when exact/prefix matching misses.
+- use `property-exact` or `driver-family` when `property` is too broad for a
+  reliable LexA/QF/GAL4-style answer.
 - tag pushes like `v0.1.0` run the release workflow: build artifacts, create a
   GitHub release, and publish to PyPI.
 - `scripts/render_homebrew_formula.py` renders a Homebrew formula from a built
