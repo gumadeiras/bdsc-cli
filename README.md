@@ -29,16 +29,16 @@ brew tap gumadeiras/tap
 brew install bdsc-cli
 ```
 
-Or install the release wheel directly with `pipx`:
+PyPI with `pipx`:
 
 ```bash
-pipx install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.1/bdsc_cli-0.2.1-py3-none-any.whl'
+pipx install bdsc-cli
 ```
 
-Or with plain `pip`:
+PyPI with plain `pip`:
 
 ```bash
-python3 -m pip install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.1/bdsc_cli-0.2.1-py3-none-any.whl'
+python3 -m pip install bdsc-cli
 ```
 
 Source install:
@@ -76,12 +76,6 @@ print(__version__)
 PY
 ).tar.gz
 ```
-
-PyPI note:
-
-- the GitHub release is live
-- PyPI trusted publishing is not configured yet for `bdsc-cli`
-- `pip install bdsc-cli` will work after that publisher is added
 
 ## Quickstart
 
