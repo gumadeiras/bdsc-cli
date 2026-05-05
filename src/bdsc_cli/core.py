@@ -737,6 +737,10 @@ def _query_tokens(text: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9]+", text.lower())
 
 
+def _is_free_text_query(text: str) -> bool:
+    return len(_query_tokens(text)) > 1
+
+
 def _compact_text(text: str) -> str:
     return "".join(_query_tokens(text))
 
@@ -1527,6 +1531,8 @@ def detect_query_kind(query: str) -> str:
         return "fbid"
     if any(token in value for token in ("P{", "}", "[", "]", "attP", "CyO")):
         return "component"
+    if _is_free_text_query(value):
+        return "search"
     return "gene"
 
 
@@ -1536,6 +1542,16 @@ def _prefix_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
 
 def _contains_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
     return f"LOWER({expr}) LIKE LOWER(?)", [f"%{query}%"]
+
+
+def _search_text_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
+    tokens = _query_tokens(query)
+    if len(tokens) <= 1:
+        return _contains_match_clause(expr, query)
+    return (
+        " AND ".join(f"LOWER({expr}) LIKE LOWER(?)" for _ in tokens),
+        [f"%{token}%" for token in tokens],
+    )
 
 
 def _exact_match_clause(expr: str, query: str) -> tuple[str, list[Any]]:
@@ -1579,6 +1595,16 @@ def _driver_family_clause(tokens: tuple[str, ...], *exprs: str) -> tuple[str, li
     params: list[Any] = []
     for expr in exprs:
         for token in tokens:
+            if token == "lexa":
+                lowered_expr = f"LOWER({expr})"
+                predicates.append(
+                    f"(({lowered_expr} GLOB ? OR {lowered_expr} GLOB ?) "
+                    f"AND NOT ({lowered_expr} GLOB ? OR {lowered_expr} GLOB ?))"
+                )
+                params.extend(
+                    ("*[^a-z0-9]lexa*", "lexa*", "*[^a-z0-9]lexaop*", "lexaop*")
+                )
+                continue
             predicates.append(f"LOWER({expr}) LIKE LOWER(?)")
             params.append(f"%{token}%")
     return "(" + " OR ".join(predicates) + ")", params
@@ -1864,10 +1890,10 @@ def _single_criterion(
 
     if resolved_kind == "search":
         if dataset == "stocks":
-            clause, params = _contains_match_clause("sd.search_text", query)
+            clause, params = _search_text_match_clause("sd.search_text", query)
             return clause, params, resolved_kind
         if dataset == "components":
-            clause, params = _contains_match_clause("sd.search_text", query)
+            clause, params = _search_text_match_clause("sd.search_text", query)
             return (
                 "EXISTS (SELECT 1 FROM search_documents sd "
                 f"WHERE sd.stknum = cc.stknum AND {clause})",
@@ -1875,14 +1901,14 @@ def _single_criterion(
                 resolved_kind,
             )
         if dataset == "genes":
-            clause, params = _contains_match_clause("sd.search_text", query)
+            clause, params = _search_text_match_clause("sd.search_text", query)
             return (
                 "EXISTS (SELECT 1 FROM search_documents sd "
                 f"WHERE sd.stknum = sg.stknum AND {clause})",
                 params,
                 resolved_kind,
             )
-        clause, params = _contains_match_clause("sd.search_text", query)
+        clause, params = _search_text_match_clause("sd.search_text", query)
         return (
             "EXISTS (SELECT 1 FROM search_documents sd "
             f"WHERE sd.stknum = cc.stknum AND {clause})",

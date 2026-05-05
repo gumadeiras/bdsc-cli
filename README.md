@@ -32,13 +32,13 @@ brew install bdsc-cli
 Or install the release wheel directly with `pipx`:
 
 ```bash
-pipx install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.0/bdsc_cli-0.2.0-py3-none-any.whl'
+pipx install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.1/bdsc_cli-0.2.1-py3-none-any.whl'
 ```
 
 Or with plain `pip`:
 
 ```bash
-python3 -m pip install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.0/bdsc_cli-0.2.0-py3-none-any.whl'
+python3 -m pip install 'bdsc-cli @ https://github.com/gumadeiras/bdsc-cli/releases/download/v0.2.1/bdsc_cli-0.2.1-py3-none-any.whl'
 ```
 
 Source install:
@@ -193,8 +193,9 @@ Auto-detect rules:
 - `FBgn...` -> `gene`
 - `FBti...` / `FBal...` / similar `FB..` ids in the component table -> `fbid`
 - transgene/component-like text (`P{...}`, brackets, `attP`, `CyO`) -> `component`
+- multi-term or dotted construct fragments -> local full-text `search`
 - `--kind property` when you want property-driven lookup explicitly
-- everything else -> `gene`, then local full-text `search` fallback if no gene hits
+- single bare terms -> `gene`, then local full-text `search` fallback if no gene hits
 
 Examples:
 

@@ -41,6 +41,9 @@ BLOOMINGTON = """\
 605645,"w[1118]; P{Or42b-QF2}attP40","2","","4/25/2026","Donor: BDSC","Or42b QF line"
 605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","2","","4/25/2026","Donor: BDSC","Or42b split driver"
 605647,"w[1118]; P{Fake-GAL4}Foo/CyO","2","","4/25/2026","Donor: BDSC","multi-component GAL4 stock"
+605648,"w[1118]; P{UAS-PlexA.W}3","3","","4/25/2026","Donor: BDSC","PlexA control"
+82182,"w[1118]; P{y[+t7.7] w[+mC]=20XUAS-CsChrimson.mCherry}su(Hw)attP1","1;3","","5/21/2019","Donor: Janelia",""
+82183,"PBac{y[+mDint2] w[+mC]=13XLexAop2-IVS-CsChrimson.tdTomato}VK00005","3","","5/21/2019","Donor: Janelia",""
 """
 
 COMPONENTS = """\
@@ -54,6 +57,9 @@ COMPONENTS = """\
 605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","P{VT012282-GAL4.DBD}attP2","FBti605646","","Or42b split driver","",""
 605647,"w[1118]; P{Fake-GAL4}Foo/CyO","P{Fake-GAL4}Foo","FBti605647","","Foo GAL4 driver","",""
 605647,"w[1118]; P{Fake-GAL4}Foo/CyO","CyO","FBab605647","","Balancer sibling","",""
+605648,"w[1118]; P{UAS-PlexA.W}3","P{UAS-PlexA.W}3","FBti605648","","PlexA expression construct","",""
+82182,"w[1118]; P{y[+t7.7] w[+mC]=20XUAS-CsChrimson.mCherry}su(Hw)attP1","P{20XUAS-CsChrimson.mCherry}su(Hw)attP1","FBti0196629","Chr 3","Expresses an mCherry-tagged red-shifted channelrhodopsin under the control of UAS.","",""
+82183,"PBac{y[+mDint2] w[+mC]=13XLexAop2-IVS-CsChrimson.tdTomato}VK00005","PBac{13XLexAop2-IVS-CsChrimson.tdTomato}VK00005","FBti0204689","Chr 3","Expresses a tdTomato-tagged red-shifted channelrhodopsin under the control of the lexA operator.","",""
 """
 
 STOCKGENES = """\
@@ -66,6 +72,9 @@ STOCKGENES = """\
 605645,"w[1118]; P{Or42b-QF2}attP40","P{Or42b-QF2}attP40","Or42b","FBgn0000005",6,50
 605646,"w[1118]; P{VT012282-GAL4.DBD}attP2","P{VT012282-GAL4.DBD}attP2","Or42b","FBgn0000005",7,50
 605647,"w[1118]; P{Fake-GAL4}Foo/CyO","P{Fake-GAL4}Foo","Foo","FBgn0000006",8,60
+605648,"w[1118]; P{UAS-PlexA.W}3","P{UAS-PlexA.W}3","PlexA","FBgn0000007",11,70
+82182,"w[1118]; P{y[+t7.7] w[+mC]=20XUAS-CsChrimson.mCherry}su(Hw)attP1","P{20XUAS-CsChrimson.mCherry}su(Hw)attP1","CsChrimson","FBto0000558",9,20
+82183,"PBac{y[+mDint2] w[+mC]=13XLexAop2-IVS-CsChrimson.tdTomato}VK00005","PBac{13XLexAop2-IVS-CsChrimson.tdTomato}VK00005","CsChrimson","FBto0000558",10,20
 """
 
 COMPGENES = """\
@@ -78,6 +87,8 @@ COMPGENES = """\
 6,50,100,"coding"
 7,50,100,"coding"
 8,60,100,"coding"
+9,20,100,"coding"
+10,20,100,"coding"
 """
 
 COMPPROPS = """\
@@ -92,6 +103,8 @@ COMPPROPS = """\
 6,600,"This components is a transgene carrying QF","QF"
 7,700,"This component expresses leucine zipper-based hemi driver of either the DNA-binding or activation domain of GAL4, QF, p65, lexA etc for use in DBDzip and ADzip combination.","split zip hemi driver"
 8,800,"GAL4 driver","GAL4"
+9,900,"This component contains mCherry.","mCherry"
+10,901,"This component contains Tomato.","Tomato"
 """
 
 
@@ -118,7 +131,7 @@ class CoreTests(unittest.TestCase):
 
     def test_build_index_and_search(self) -> None:
         counts = build_index(self.state_dir)
-        self.assertEqual(counts["stocks"], 8)
+        self.assertEqual(counts["stocks"], 11)
         results = search_local(self.state_dir, "Chronos")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["stknum"], 77118)
@@ -143,7 +156,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(fuzzy_results[0]["gene_symbol"], "Chronos")
         status = get_status(self.state_dir)
         self.assertTrue(status["db_exists"])
-        self.assertEqual(status["index"]["counts"]["stocks"], 8)
+        self.assertEqual(status["index"]["counts"]["stocks"], 11)
 
     def test_component_fbid_and_rrid_queries(self) -> None:
         build_index(self.state_dir)
@@ -170,6 +183,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(detect_query_kind("FBgn0000001"), "gene")
         self.assertEqual(detect_query_kind("FBti0195688"), "fbid")
         self.assertEqual(detect_query_kind("P{10XUAS-Chronos"), "component")
+        self.assertEqual(detect_query_kind("cschrimson.tdtomato"), "search")
+        self.assertEqual(detect_query_kind("lexaop cschrimson"), "search")
         self.assertEqual(detect_query_kind("Chronos"), "gene")
 
     def test_lookup_query_auto_and_fallback(self) -> None:
@@ -186,6 +201,12 @@ class CoreTests(unittest.TestCase):
         typo_fallback = lookup_query(self.state_dir, "Chronis")
         self.assertEqual(typo_fallback["kind"], "gene")
         self.assertEqual(typo_fallback["results"][0]["gene_symbol"], "Chronos")
+        construct = lookup_query(self.state_dir, "cschrimson.tdtomato")
+        self.assertEqual(construct["kind"], "search")
+        self.assertEqual(construct["results"][0]["stknum"], 82183)
+        lexical_construct = lookup_query(self.state_dir, "lexaop cschrimson")
+        self.assertEqual(lexical_construct["kind"], "search")
+        self.assertIn(82183, {row["stknum"] for row in lexical_construct["results"]})
 
     def test_property_search(self) -> None:
         build_index(self.state_dir)
@@ -200,6 +221,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual({row["stknum"] for row in exact_lexa}, {605642})
         family_lexa = search_driver_family(self.state_dir, "lexA")
         self.assertEqual({row["stknum"] for row in family_lexa}, {605642, 605644})
+        self.assertNotIn(605648, {row["stknum"] for row in family_lexa})
         family_qf = search_driver_family(self.state_dir, "QF")
         self.assertEqual({row["stknum"] for row in family_qf}, {605645})
         family_gal4_components = {row["component_symbol"] for row in search_driver_family(self.state_dir, "GAL4")}
@@ -209,7 +231,7 @@ class CoreTests(unittest.TestCase):
     def test_relationship_search(self) -> None:
         build_index(self.state_dir)
         results = search_relationship(self.state_dir, "coding")
-        self.assertEqual(len(results), 8)
+        self.assertEqual(len(results), 10)
         self.assertEqual(results[0]["gene_relationships"], "coding")
         fuzzy_results = search_relationship(self.state_dir, "codng")
         self.assertEqual(fuzzy_results[0]["gene_relationships"], "coding")
@@ -240,7 +262,7 @@ class CoreTests(unittest.TestCase):
         relationships = list(
             iter_export_rows(self.state_dir, "genes", query="coding", kind="relationship")
         )
-        self.assertEqual(len(relationships), 8)
+        self.assertEqual(len(relationships), 10)
 
         exact_lexa = list(
             iter_export_rows(self.state_dir, "components", query="lexA", kind="property-exact")
@@ -303,7 +325,7 @@ class CoreTests(unittest.TestCase):
         build_index(self.state_dir)
         result = lookup_query(self.state_dir, "coding", kind="relationship")
         self.assertEqual(result["kind"], "relationship")
-        self.assertEqual(result["result_count"], 8)
+        self.assertEqual(result["result_count"], 10)
         exact_property = lookup_query(self.state_dir, "lexA", kind="property-exact")
         self.assertEqual({row["stknum"] for row in exact_property["results"]}, {605642})
         family = lookup_query(self.state_dir, "qf", kind="driver-family")
@@ -448,7 +470,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("CyO", {row["component_symbol"] for row in drivers})
 
         optogenetics = list(iter_report_rows(self.state_dir, "optogenetics", dataset="components"))
-        self.assertEqual({row["stknum"] for row in optogenetics}, {77118, 77119})
+        self.assertEqual({row["stknum"] for row in optogenetics}, {77118, 77119, 82182, 82183})
 
     def test_report_command_json(self) -> None:
         build_index(self.state_dir)
