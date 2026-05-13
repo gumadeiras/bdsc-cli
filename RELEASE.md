@@ -40,6 +40,16 @@ git push origin vX.Y.Z
 - PyPI publish runs from the same artifacts
 - `gumadeiras/homebrew-tap` is updated from the release sdist artifact
 
+## Changelog Rules
+
+- Every release must update `CHANGELOG.md` before the release tag is created.
+- `CHANGELOG.md` must always keep an `Unreleased` section at the top for future entries.
+- New user-facing changes should be added to `Unreleased` as they land.
+- Use user-facing language whenever possible. Describe what changed for people using bdsc-cli, not repository maintenance.
+- Use these sections when they apply: `Features`, `Fixes`, and `Changes`.
+- Omit empty sections.
+- Do not include release chores unless the change affects how users install or use bdsc-cli.
+
 ## Homebrew
 
 The `homebrew-tap` release job updates `Formula/bdsc-cli.rb` automatically
