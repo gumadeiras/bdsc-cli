@@ -74,6 +74,7 @@ jobs:
     needs:
       - build
       - github-release
+      - pypi
     runs-on: ubuntu-latest
     env:
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -106,9 +107,13 @@ jobs:
 
       - name: Render formula
         run: |
-          python bdsc-cli/scripts/render_homebrew_formula.py \
-            dist/bdsc_cli-${GITHUB_REF_NAME#v}.tar.gz \
-            --output homebrew-tap/Formula/bdsc-cli.rb
+          version="${GITHUB_REF_NAME#v}"
+          sdist="dist/bdsc_cli-${version}.tar.gz"
+          sha256="$(sha256sum "$sdist" | awk '{print $1}')"
+          python homebrew-tap/scripts/update_formula.py \
+            --formula homebrew-tap/Formula/bdsc-cli.rb \
+            --url "https://github.com/gumadeiras/bdsc-cli/releases/download/v${version}/bdsc_cli-${version}.tar.gz" \
+            --sha256 "$sha256"
 
       - name: Commit and push formula
         working-directory: homebrew-tap

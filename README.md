@@ -70,11 +70,6 @@ Build release artifacts locally:
 python -m pip install -e .[release]
 python -m build
 python -m twine check dist/*
-python scripts/render_homebrew_formula.py dist/bdsc_cli-$(python - <<'PY'
-from bdsc_cli import __version__
-print(__version__)
-PY
-).tar.gz
 ```
 
 ## Quickstart
@@ -330,9 +325,7 @@ bdsc terms property-descriptions --query optogenetic --jsonl
 - use `property-exact` or `driver-family` when `property` is too broad for a
   reliable LexA/QF/GAL4-style answer.
 - tag pushes like `vX.Y.Z` run the release workflow: build artifacts, create a
-  GitHub release, and publish to PyPI.
-- `scripts/render_homebrew_formula.py` renders a Homebrew formula from a built
-  sdist; use it when updating a tap after a release.
+  GitHub release, publish to PyPI, and update `gumadeiras/homebrew-tap`.
 - The live endpoint is undocumented and may change without notice.
 - BDSC data is large enough that the first full sync/index can take a few
   minutes depending on network and disk speed.

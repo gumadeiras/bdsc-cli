@@ -19,11 +19,6 @@ python -m pip install -e '.[release]'
 python -m unittest discover -s tests
 python -m build
 python -m twine check dist/*
-python scripts/render_homebrew_formula.py dist/bdsc_cli-$(python - <<'PY'
-from bdsc_cli import __version__
-print(__version__)
-PY
-).tar.gz
 ```
 
 ## Publish
@@ -47,8 +42,8 @@ git push origin vX.Y.Z
 
 ## Homebrew
 
-The `homebrew-tap` release job updates `Formula/bdsc-cli.rb` automatically.
-It renders the formula from the same sdist artifact used for the GitHub release.
+The `homebrew-tap` release job updates `Formula/bdsc-cli.rb` automatically
+from the same sdist artifact used for the GitHub release.
 
 If the tap update fails or needs manual repair, use the published release asset,
 not a freshly built local sdist:
@@ -56,10 +51,14 @@ not a freshly built local sdist:
 ```bash
 curl -L -o /tmp/bdsc_cli-X.Y.Z.tar.gz \
   https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc_cli-X.Y.Z.tar.gz
-python scripts/render_homebrew_formula.py /tmp/bdsc_cli-X.Y.Z.tar.gz --output /tmp/bdsc-cli.rb
+sha256="$(shasum -a 256 /tmp/bdsc_cli-X.Y.Z.tar.gz | awk '{print $1}')"
+python ../homebrew-tap/scripts/update_formula.py \
+  --formula ../homebrew-tap/Formula/bdsc-cli.rb \
+  --url https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc_cli-X.Y.Z.tar.gz \
+  --sha256 "$sha256"
 ```
 
-Then commit the rendered formula into `~/git/homebrew-tap` and push `main`.
+Then commit the formula in `~/git/homebrew-tap` and push `main`.
 
 ## PyPI Trusted Publisher
 
