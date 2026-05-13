@@ -7,14 +7,15 @@
 - `src/bdsc_cli/__init__.py` has the target `__version__`
 - PyPI trusted publishing configured for this repo
 - GitHub token can create releases
-- Homebrew tap repo ready for formula update
+- `HOMEBREW_TAP_TOKEN` repository secret can write to
+  `gumadeiras/homebrew-tap`
 
 ## Local Preflight
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e .[release]
+python -m pip install -e '.[release]'
 python -m unittest discover -s tests
 python -m build
 python -m twine check dist/*
@@ -42,10 +43,15 @@ git push origin vX.Y.Z
 - `twine check` validates package metadata
 - GitHub release is created with built artifacts attached
 - PyPI publish runs from the same artifacts
+- `gumadeiras/homebrew-tap` is updated from the release sdist artifact
 
 ## Homebrew
 
-After the GitHub release exists:
+The `homebrew-tap` release job updates `Formula/bdsc-cli.rb` automatically.
+It renders the formula from the same sdist artifact used for the GitHub release.
+
+If the tap update fails or needs manual repair, use the published release asset,
+not a freshly built local sdist:
 
 ```bash
 curl -L -o /tmp/bdsc_cli-X.Y.Z.tar.gz \
@@ -53,8 +59,7 @@ curl -L -o /tmp/bdsc_cli-X.Y.Z.tar.gz \
 python scripts/render_homebrew_formula.py /tmp/bdsc_cli-X.Y.Z.tar.gz --output /tmp/bdsc-cli.rb
 ```
 
-Then commit the rendered formula into the tap repo with the matching release
-version and sha256.
+Then commit the rendered formula into `~/git/homebrew-tap` and push `main`.
 
 ## PyPI Trusted Publisher
 
