@@ -857,11 +857,30 @@ def _merge_ranked_matches(
     )
 
 
+def _limit_sql(limit: int | None) -> tuple[str, list[int]]:
+    if limit is None:
+        return "", []
+    return "LIMIT ?", [limit]
+
+
+def _scaled_limit(limit: int | None, multiplier: int, floor: int) -> int | None:
+    if limit is None:
+        return None
+    return max(limit * multiplier, floor)
+
+
+def _limit_rows(rows: list[Any], limit: int | None) -> list[Any]:
+    if limit is None:
+        return rows
+    return rows[:limit]
+
+
 def _search_candidates_from_prefix_fts(
     conn: sqlite3.Connection,
     query: str,
-    limit: int,
+    limit: int | None,
 ) -> list[dict[str, Any]]:
+    limit_clause, limit_params = _limit_sql(limit)
     has_fts = bool(
         conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_fts'"
@@ -869,7 +888,7 @@ def _search_candidates_from_prefix_fts(
     )
     if not has_fts:
         rows = conn.execute(
-            """
+            f"""
             SELECT
               s.stknum,
               s.genotype,
@@ -881,14 +900,14 @@ def _search_candidates_from_prefix_fts(
             JOIN stocks s ON s.stknum = sd.stknum
             WHERE sd.search_text LIKE ?
             ORDER BY s.stknum
-            LIMIT ?
+            {limit_clause}
             """,
-            (f"%{query}%", limit),
+            (f"%{query}%", *limit_params),
         ).fetchall()
         return [{"row": row, "score": _score_search_document(query, row) + 20.0} for row in rows]
 
     rows = conn.execute(
-        """
+        f"""
         SELECT
           s.stknum,
           s.genotype,
@@ -902,9 +921,9 @@ def _search_candidates_from_prefix_fts(
         JOIN search_documents sd ON sd.stknum = s.stknum
         WHERE stock_fts MATCH ?
         ORDER BY bm25(stock_fts), s.stknum
-        LIMIT ?
+        {limit_clause}
         """,
-        (build_fts_query(query), limit),
+        (build_fts_query(query), *limit_params),
     ).fetchall()
     return [
         {
@@ -918,11 +937,12 @@ def _search_candidates_from_prefix_fts(
 def _search_candidates_from_trigram_fts(
     conn: sqlite3.Connection,
     query: str,
-    limit: int,
+    limit: int | None,
 ) -> list[dict[str, Any]]:
     trigram_query = build_trigram_query(query)
     if not trigram_query:
         return []
+    limit_clause, limit_params = _limit_sql(limit)
 
     has_trigram = bool(
         conn.execute(
@@ -933,7 +953,7 @@ def _search_candidates_from_trigram_fts(
         return []
 
     rows = conn.execute(
-        """
+        f"""
         SELECT
           s.stknum,
           s.genotype,
@@ -947,9 +967,9 @@ def _search_candidates_from_trigram_fts(
         JOIN search_documents sd ON sd.stknum = s.stknum
         WHERE stock_trigram MATCH ?
         ORDER BY bm25(stock_trigram), s.stknum
-        LIMIT ?
+        {limit_clause}
         """,
-        (trigram_query, limit),
+        (trigram_query, *limit_params),
     ).fetchall()
 
     matches: list[dict[str, Any]] = []
@@ -963,21 +983,21 @@ def _search_candidates_from_trigram_fts(
 def _candidate_stock_ids_for_query(
     conn: sqlite3.Connection,
     query: str,
-    limit: int,
+    limit: int | None,
 ) -> list[int]:
     candidates: dict[int, float] = {}
-    for match in _search_candidates_from_prefix_fts(conn, query, max(limit * 2, 20)):
+    for match in _search_candidates_from_prefix_fts(conn, query, _scaled_limit(limit, 2, 20)):
         candidates[match["row"]["stknum"]] = max(
             match["score"],
             candidates.get(match["row"]["stknum"], float("-inf")),
         )
-    for match in _search_candidates_from_trigram_fts(conn, query, max(limit * 6, 60)):
+    for match in _search_candidates_from_trigram_fts(conn, query, _scaled_limit(limit, 6, 60)):
         candidates[match["row"]["stknum"]] = max(
             match["score"],
             candidates.get(match["row"]["stknum"], float("-inf")),
         )
     ranked = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
-    return [stknum for stknum, _ in ranked[:limit]]
+    return _limit_rows([stknum for stknum, _ in ranked], limit)
 
 
 def _score_field_match(query: str, text: str) -> float:
@@ -1031,7 +1051,7 @@ def _rank_direct_rows(
     rows: list[sqlite3.Row],
     *,
     field_names: list[str],
-    limit: int,
+    limit: int | None,
     min_score: float = 5.0,
     key_fn=None,
 ) -> list[dict[str, Any]]:
@@ -1044,10 +1064,10 @@ def _rank_direct_rows(
     if key_fn is None:
         key_fn = _default_row_key
     ranked = _merge_ranked_matches(scored, key_fn)
-    return [dict(item["row"]) for item in ranked[:limit]]
+    return [dict(item["row"]) for item in _limit_rows(ranked, limit)]
 
 
-def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str, Any]]:
+def search_local(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
@@ -1059,14 +1079,14 @@ def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str,
             return [stock] if stock else []
 
         candidates: dict[int, dict[str, Any]] = {}
-        for match in _search_candidates_from_prefix_fts(conn, query, max(limit * 3, 20)):
+        for match in _search_candidates_from_prefix_fts(conn, query, _scaled_limit(limit, 3, 20)):
             stknum = match["row"]["stknum"]
             existing = candidates.get(stknum)
             if existing is None or match["score"] > existing["score"]:
                 candidates[stknum] = match
 
         if not candidates:
-            for match in _search_candidates_from_trigram_fts(conn, query, max(limit * 12, 60)):
+            for match in _search_candidates_from_trigram_fts(conn, query, _scaled_limit(limit, 12, 60)):
                 stknum = match["row"]["stknum"]
                 existing = candidates.get(stknum)
                 if existing is None or match["score"] > existing["score"]:
@@ -1076,21 +1096,22 @@ def search_local(state_dir: Path, query: str, limit: int = 10) -> list[dict[str,
             candidates.values(),
             key=lambda item: (-item["score"], item["row"]["stknum"]),
         )
-        return [_search_result_payload(item["row"]) for item in ranked[:limit]]
+        return [_search_result_payload(item["row"]) for item in _limit_rows(ranked, limit)]
     finally:
         conn.close()
 
 
-def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_gene(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
         return []
 
     conn = _connect(state_dir)
     try:
+        limit_clause, limit_params = _limit_sql(limit)
         if query.upper().startswith("FBGN"):
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT
                   sg.stknum,
                   sg.genotype,
@@ -1100,13 +1121,13 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
                 FROM stockgenes sg
                 WHERE UPPER(sg.fbgn) = UPPER(?)
                 ORDER BY sg.stknum, sg.component_symbol, sg.gene_symbol
-                LIMIT ?
+                {limit_clause}
                 """,
-                (query, limit),
+                (query, *limit_params),
             ).fetchall()
         else:
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT
                   sg.stknum,
                   sg.genotype,
@@ -1121,14 +1142,14 @@ def search_gene(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, 
                   sg.stknum,
                   sg.component_symbol,
                   sg.gene_symbol
-                LIMIT ?
+                {limit_clause}
                 """,
-                (query, f"{query}%", query, limit),
+                (query, f"{query}%", query, *limit_params),
             ).fetchall()
         if rows:
             return _rows_to_dicts(rows)
 
-        stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+        stock_ids = _candidate_stock_ids_for_query(conn, query, _scaled_limit(limit, 4, 40))
         if not stock_ids:
             return []
         placeholders = ", ".join("?" for _ in stock_ids)
@@ -1223,7 +1244,7 @@ def _search_component_table(
     conn: sqlite3.Connection | None = None,
     column: str,
     query: str,
-    limit: int,
+    limit: int | None,
 ) -> list[dict[str, Any]]:
     query = query.strip()
     if not query:
@@ -1235,6 +1256,7 @@ def _search_component_table(
     close_conn = conn is None
     conn = conn or _connect(state_dir)
     try:
+        limit_clause, limit_params = _limit_sql(limit)
         rows = conn.execute(
             f"""
             SELECT
@@ -1255,14 +1277,14 @@ def _search_component_table(
               CASE WHEN LOWER(cc.{column}) = LOWER(?) THEN 0 ELSE 1 END,
               cc.stknum,
               cc.component_symbol
-            LIMIT ?
+            {limit_clause}
             """,
-            (query, f"{query}%", query, limit),
+            (query, f"{query}%", query, *limit_params),
         ).fetchall()
         if rows:
             return _rows_to_dicts(rows)
 
-        stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+        stock_ids = _candidate_stock_ids_for_query(conn, query, _scaled_limit(limit, 4, 40))
         if not stock_ids:
             return []
         placeholders = ", ".join("?" for _ in stock_ids)
@@ -1302,11 +1324,12 @@ def _search_component_table(
 def _fetch_component_domain_rows(
     conn: sqlite3.Connection,
     query: str,
-    limit: int,
+    limit: int | None,
     *,
     cte_sql: str,
     cte_params: list[Any],
 ) -> list[sqlite3.Row]:
+    limit_clause, limit_params = _limit_sql(limit)
     rows = conn.execute(
         f"""
         {cte_sql}
@@ -1331,14 +1354,14 @@ def _fetch_component_domain_rows(
           cc.mapstatement,
           sg0.bdsc_symbol_id
         ORDER BY cc.stknum, cc.component_symbol
-        LIMIT ?
+        {limit_clause}
         """,
-        (*cte_params, limit),
+        (*cte_params, *limit_params),
     ).fetchall()
     if rows:
         return rows
 
-    stock_ids = _candidate_stock_ids_for_query(conn, query, max(limit * 4, 40))
+    stock_ids = _candidate_stock_ids_for_query(conn, query, _scaled_limit(limit, 4, 40))
     if not stock_ids:
         return []
     placeholders = ", ".join("?" for _ in stock_ids)
@@ -1370,7 +1393,7 @@ def _fetch_component_domain_rows(
 def _search_component_domain(
     state_dir: Path,
     query: str,
-    limit: int,
+    limit: int | None,
     *,
     cte_sql: str,
     cte_params: list[Any],
@@ -1400,7 +1423,7 @@ def _search_component_domain(
         conn.close()
 
 
-def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_property(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     return _search_component_domain(
         state_dir,
@@ -1420,7 +1443,7 @@ def search_property(state_dir: Path, query: str, limit: int = 20) -> list[dict[s
     )
 
 
-def search_property_exact(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_property_exact(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     return _search_component_domain(
         state_dir,
@@ -1439,7 +1462,7 @@ def search_property_exact(state_dir: Path, query: str, limit: int = 20) -> list[
     )
 
 
-def search_driver_family(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_driver_family(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     _, tokens = normalize_driver_family(query)
     clause, params = _driver_family_clause(
@@ -1469,7 +1492,7 @@ def search_driver_family(state_dir: Path, query: str, limit: int = 20) -> list[d
     )
 
 
-def search_relationship(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_relationship(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     query = query.strip()
     return _search_component_domain(
         state_dir,
@@ -1504,11 +1527,11 @@ def get_stock_by_rrid(state_dir: Path, query: str) -> dict[str, Any] | None:
     return get_stock(state_dir, stknum)
 
 
-def search_fbid(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_fbid(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     return _search_component_table(state_dir, column="fbid", query=query, limit=limit)
 
 
-def search_component(state_dir: Path, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_component(state_dir: Path, query: str, limit: int | None = None) -> list[dict[str, Any]]:
     return _search_component_table(
         state_dir,
         column="component_symbol",
@@ -1963,7 +1986,7 @@ def lookup_query(
     query: str,
     *,
     kind: str = "auto",
-    limit: int = 20,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     requested_kind = kind
     resolved_kind = detect_query_kind(query) if kind == "auto" else kind
@@ -2073,7 +2096,7 @@ def get_stock(state_dir: Path, stknum: int) -> dict[str, Any] | None:
         conn.close()
 
 
-def live_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
+def live_search(query: str, limit: int | None = None) -> list[dict[str, Any]]:
     simple_payload = parse.urlencode({"presearch": query, "type": "contains"}).encode("utf-8")
     req = request.Request(
         "https://bdsc.indiana.edu/Home/GetSearchResults",
@@ -2089,7 +2112,7 @@ def live_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
         data = json.loads(response.read().decode("utf-8"))
     rows = data.get("Data") or []
     if rows:
-        return rows[:limit]
+        return _limit_rows(rows, limit)
 
     advanced_payload = parse.urlencode(
         {
@@ -2119,7 +2142,7 @@ def live_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     )
     with request.urlopen(advanced_req) as response:
         advanced_data = json.loads(response.read().decode("utf-8"))
-    return (advanced_data.get("Data") or [])[:limit]
+    return _limit_rows(advanced_data.get("Data") or [], limit)
 
 
 def get_status(state_dir: Path) -> dict[str, Any]:
@@ -2282,11 +2305,10 @@ def iter_dataset_rows(
             sql += f"\n{where_clause}"
         sql += f"\n{_dataset_sort_clause(dataset)}"
 
-        if limit is not None:
-            sql += "\nLIMIT ?"
-            cursor = conn.execute(sql, (*params, limit))
-        else:
-            cursor = conn.execute(sql, params)
+        limit_clause, limit_params = _limit_sql(limit)
+        if limit_clause:
+            sql += f"\n{limit_clause}"
+        cursor = conn.execute(sql, (*params, *limit_params))
 
         columns = [description[0] for description in cursor.description]
         try:
@@ -2400,9 +2422,7 @@ def iter_report_rows(
             break
 
     deduped = _merge_report_rows(resolved_dataset, merged_rows)
-    if limit is not None:
-        deduped = deduped[:limit]
-    for row in deduped:
+    for row in _limit_rows(deduped, limit):
         yield row
 
 

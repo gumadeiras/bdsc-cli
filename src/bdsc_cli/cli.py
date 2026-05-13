@@ -75,6 +75,12 @@ LEGACY_COMMANDS = {
 PUBLIC_COMMAND_METAVAR = "{sync,build-index,export,report,terms,status,find,stock}"
 
 
+class HelpOnErrorArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        self.print_help(sys.stderr)
+        self.exit(2, f"\nerror: {message}\n")
+
+
 def _filter_dest(kind: str) -> str:
     return f"{kind.replace('-', '_')}_filters"
 
@@ -85,6 +91,24 @@ def add_json_flags(parser: argparse.ArgumentParser, *, jsonl: bool = True) -> No
         parser.add_argument("--jsonl", action="store_true")
 
 
+def add_limit_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--limit", type=int, help="max rows to emit")
+
+
+def add_subcommand(subparsers, name: str, **kwargs):
+    parser = subparsers.add_parser(name, **kwargs)
+    parser.set_defaults(_command_parser=parser)
+    return parser
+
+
+def command_error(
+    root_parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    message: str,
+) -> None:
+    getattr(args, "_command_parser", root_parser).error(message)
+
+
 def add_query_parser(
     subparsers,
     name: str,
@@ -93,10 +117,10 @@ def add_query_parser(
     jsonl: bool = True,
     hidden: bool = False,
 ):
-    parser = subparsers.add_parser(name, help=LEGACY_HELP if hidden else help_text)
+    parser = add_subcommand(subparsers, name, help=LEGACY_HELP if hidden else help_text)
     parser.add_argument("query")
     parser.add_argument("--state-dir", help="cache/index directory")
-    parser.add_argument("--limit", type=int, default=20)
+    add_limit_argument(parser)
     add_json_flags(parser, jsonl=jsonl)
     return parser
 
@@ -110,15 +134,16 @@ def hide_legacy_commands(subparsers_action) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="bdsc", description="Sync and query BDSC data")
+    parser = HelpOnErrorArgumentParser(prog="bdsc", description="Sync and query BDSC data")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(
         dest="command",
         required=True,
         metavar=PUBLIC_COMMAND_METAVAR,
+        parser_class=HelpOnErrorArgumentParser,
     )
 
-    sync_parser = subparsers.add_parser("sync", help="download public BDSC CSV datasets")
+    sync_parser = add_subcommand(subparsers, "sync", help="download public BDSC CSV datasets")
     sync_parser.add_argument("--state-dir", help="cache/index directory")
     sync_parser.add_argument("--force", action="store_true", help="skip conditional HTTP headers")
     sync_parser.add_argument(
@@ -127,17 +152,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="download only; do not rebuild the local SQLite index",
     )
 
-    build_parser_cmd = subparsers.add_parser(
+    build_parser_cmd = add_subcommand(
+        subparsers,
         "build-index", help="rebuild the local SQLite index from downloaded CSVs"
     )
     build_parser_cmd.add_argument("--state-dir", help="cache/index directory")
 
-    export_parser = subparsers.add_parser(
+    export_parser = add_subcommand(
+        subparsers,
         "export", help="stream normalized rows for stocks/components/genes/properties"
     )
     export_parser.add_argument("dataset", choices=EXPORT_DATASETS)
     export_parser.add_argument("--state-dir", help="cache/index directory")
-    export_parser.add_argument("--limit", type=int, help="max rows to emit")
+    add_limit_argument(export_parser)
     export_parser.add_argument("--query", help="filter exported rows by a query value")
     export_parser.add_argument(
         "--kind",
@@ -157,7 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="output path; defaults to stdout",
     )
 
-    report_parser = subparsers.add_parser(
+    report_parser = add_subcommand(
+        subparsers,
         "report",
         help="canned reports for common BDSC retrieval tasks",
     )
@@ -168,11 +196,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the report's default dataset",
     )
     report_parser.add_argument("--state-dir", help="cache/index directory")
-    report_parser.add_argument("--limit", type=int, default=20)
+    add_limit_argument(report_parser)
     report_parser.add_argument("--json", action="store_true")
     report_parser.add_argument("--jsonl", action="store_true")
 
-    filter_parser = subparsers.add_parser(
+    filter_parser = add_subcommand(
+        subparsers,
         "filter",
         help=LEGACY_HELP,
     )
@@ -183,12 +212,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="row shape to return",
     )
     filter_parser.add_argument("--state-dir", help="cache/index directory")
-    filter_parser.add_argument("--limit", type=int, default=20)
+    add_limit_argument(filter_parser)
     add_filter_arguments(filter_parser)
     filter_parser.add_argument("--json", action="store_true")
     filter_parser.add_argument("--jsonl", action="store_true")
 
-    terms_parser = subparsers.add_parser(
+    terms_parser = add_subcommand(
+        subparsers,
         "terms",
         help="list available property/relationship vocab with counts",
     )
@@ -199,19 +229,21 @@ def build_parser() -> argparse.ArgumentParser:
     terms_parser.add_argument("--json", action="store_true")
     terms_parser.add_argument("--jsonl", action="store_true")
 
-    status_parser = subparsers.add_parser(
+    status_parser = add_subcommand(
+        subparsers,
         "status", help="show local dataset/index status for the current state dir"
     )
     status_parser.add_argument("--state-dir", help="cache/index directory")
     add_json_flags(status_parser, jsonl=False)
 
-    find_parser = subparsers.add_parser(
+    find_parser = add_subcommand(
+        subparsers,
         "find",
         help="primary query command; free-text lookup or structured compound filters",
     )
     find_parser.add_argument("query", nargs="?")
     find_parser.add_argument("--state-dir", help="cache/index directory")
-    find_parser.add_argument("--limit", type=int, default=20)
+    add_limit_argument(find_parser)
     find_parser.add_argument(
         "--kind",
         choices=LOOKUP_KINDS,
@@ -231,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
         "search",
         "query the local SQLite index",
         hidden=True,
-    ).set_defaults(limit=10)
+    )
     add_query_parser(
         subparsers,
         "gene",
@@ -251,12 +283,12 @@ def build_parser() -> argparse.ArgumentParser:
         hidden=True,
     )
 
-    stock_parser = subparsers.add_parser("stock", help="show local details for one stock")
+    stock_parser = add_subcommand(subparsers, "stock", help="show local details for one stock")
     stock_parser.add_argument("stknum", type=int)
     stock_parser.add_argument("--state-dir", help="cache/index directory")
     add_json_flags(stock_parser, jsonl=False)
 
-    rrid_parser = subparsers.add_parser("rrid", help=LEGACY_HELP)
+    rrid_parser = add_subcommand(subparsers, "rrid", help=LEGACY_HELP)
     rrid_parser.add_argument("query")
     rrid_parser.add_argument("--state-dir", help="cache/index directory")
     add_json_flags(rrid_parser, jsonl=False)
@@ -286,25 +318,27 @@ def build_parser() -> argparse.ArgumentParser:
         hidden=True,
     )
 
-    lookup_parser = subparsers.add_parser(
+    lookup_parser = add_subcommand(
+        subparsers,
         "lookup",
         help=LEGACY_HELP,
     )
     lookup_parser.add_argument("queries", nargs="*")
     lookup_parser.add_argument("--state-dir", help="cache/index directory")
     lookup_parser.add_argument("--kind", choices=LOOKUP_KINDS, default="auto")
-    lookup_parser.add_argument("--limit", type=int, default=20)
+    add_limit_argument(lookup_parser)
     lookup_parser.add_argument(
         "--input",
         help="read newline-delimited queries from a file path or '-' for stdin",
     )
     add_json_flags(lookup_parser)
 
-    live_parser = subparsers.add_parser(
+    live_parser = add_subcommand(
+        subparsers,
         "live-search", help=LEGACY_HELP
     )
     live_parser.add_argument("query")
-    live_parser.add_argument("--limit", type=int, default=10)
+    add_limit_argument(live_parser)
     add_json_flags(live_parser)
 
     hide_legacy_commands(subparsers)
@@ -446,7 +480,7 @@ def run_find(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     query = (args.query or "").strip()
     criteria = build_filter_criteria(args)
     if not query and not criteria:
-        parser.error("find requires a query or at least one filter flag")
+        command_error(parser, args, "find requires a query or at least one filter flag")
 
     state_dir = resolve_state_dir(args.state_dir)
     if query and not criteria and not args.dataset:
@@ -477,7 +511,7 @@ def run_find(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 def run_legacy_lookup(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     queries = load_queries(args.queries, args.input)
     if not queries:
-        parser.error("lookup requires at least one query or --input")
+        command_error(parser, args, "lookup requires at least one query or --input")
     state_dir = resolve_state_dir(args.state_dir)
     lookup_results = [
         lookup_query(state_dir, query, kind=args.kind, limit=args.limit)
@@ -542,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "filter":
             criteria = build_filter_criteria(args)
             if not criteria:
-                parser.error("filter requires at least one filter flag")
+                command_error(parser, args, "filter requires at least one filter flag")
             rows = list(
                 iter_export_rows(
                     state_dir,

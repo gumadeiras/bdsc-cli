@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -122,6 +123,44 @@ class CoreTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def add_many_cschrimson_rows(self, count: int = 60) -> None:
+        raw_dir = self.state_dir / "raw"
+        bloomington_rows = []
+        component_rows = []
+        stockgene_rows = []
+        for index in range(count):
+            stknum = 78000 + index
+            component = f"P{{20XUAS-CsChrimson.synthetic{index}}}attP2"
+            genotype = f"w[1118]; {component}"
+            bloomington_rows.append(
+                f'{stknum},"{genotype}","2","","5/21/2019","Donor: Janelia","synthetic CsChrimson row"'
+            )
+            component_rows.append(
+                f'{stknum},"{genotype}","{component}","FBti78{index:04d}","","CsChrimson synthetic construct","",""'
+            )
+            stockgene_rows.append(
+                f'{stknum},"{genotype}","{component}","CsChrimson","FBto0000558",{78000 + index},20'
+            )
+
+        for filename, rows in (
+            ("bloomington.csv", bloomington_rows),
+            ("stockcomps_map_comments.csv", component_rows),
+            ("stockgenes.csv", stockgene_rows),
+        ):
+            path = raw_dir / filename
+            path.write_text(path.read_text(encoding="utf-8") + "\n".join(rows) + "\n", encoding="utf-8")
+
+    def assert_cli_error_shows_help(self, argv: list[str], *expected: str) -> str:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                main(argv)
+        self.assertEqual(raised.exception.code, 2)
+        output = stderr.getvalue()
+        for text in expected:
+            self.assertIn(text, output)
+        return output
 
     def test_build_fts_query_tokenizes_text(self) -> None:
         self.assertEqual(build_fts_query("10XUAS-Chronos"), "10xuas* chronos*")
@@ -367,6 +406,75 @@ class CoreTests(unittest.TestCase):
         payload = stdout.getvalue()
         self.assertIn('"kind": "gene"', payload)
         self.assertIn('"Chronos"', payload)
+
+    def test_find_and_search_have_no_default_limit(self) -> None:
+        self.add_many_cschrimson_rows()
+        build_index(self.state_dir)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "find",
+                    "CsChrimson",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        find_payload = json.loads(stdout.getvalue())
+        self.assertEqual(find_payload["result_count"], 63)
+        self.assertIn(82182, {row["stknum"] for row in find_payload["results"]})
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "search",
+                    "CsChrimson",
+                    "--state-dir",
+                    str(self.state_dir),
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        search_payload = json.loads(stdout.getvalue())
+        self.assertEqual(len(search_payload), 63)
+        self.assertIn(82182, {row["stknum"] for row in search_payload})
+
+    def test_missing_arguments_show_relevant_help(self) -> None:
+        self.assert_cli_error_shows_help([], "usage: bdsc", "find", "stock")
+        self.assert_cli_error_shows_help(
+            ["export"],
+            "usage: bdsc export",
+            "stocks",
+            "error: the following arguments are required: dataset",
+        )
+        self.assert_cli_error_shows_help(
+            ["stock"],
+            "usage: bdsc stock",
+            "stknum",
+            "error: the following arguments are required: stknum",
+        )
+        self.assert_cli_error_shows_help(
+            ["find"],
+            "usage: bdsc find",
+            "--gene",
+            "error: find requires a query or at least one filter flag",
+        )
+        self.assert_cli_error_shows_help(
+            ["filter"],
+            "usage: bdsc filter",
+            "--gene",
+            "error: filter requires at least one filter flag",
+        )
+        self.assert_cli_error_shows_help(
+            ["lookup"],
+            "usage: bdsc lookup",
+            "--input",
+            "error: lookup requires at least one query or --input",
+        )
 
     def test_find_command_filter_mode(self) -> None:
         build_index(self.state_dir)

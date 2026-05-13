@@ -163,6 +163,9 @@ bdsc export components --limit 5 --format jsonl
 bdsc stock 77118 --json
 ```
 
+Query commands return all matches by default. Use `--limit N` when you want a
+bounded result set.
+
 ## Commands
 
 - `bdsc sync`: download the BDSC CSV datasets; builds the index by default
