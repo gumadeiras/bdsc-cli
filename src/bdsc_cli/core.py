@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib import error, parse, request
 
-USER_AGENT = "bdsc-cli/0.1 (+https://bdsc.indiana.edu/)"
+USER_AGENT = "bdsc/0.1 (+https://bdsc.indiana.edu/)"
 DEFAULT_STATE_DIR = Path(
     os.environ.get("BDSC_CLI_HOME", Path.home() / ".local" / "share" / "bdsc-cli")
 )

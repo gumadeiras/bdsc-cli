@@ -18,7 +18,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install release tooling
-        run: python -m pip install -e .[release]
+        run: python -m pip install -e '.[release]'
 
       - name: Build distributions
         run: python -m build
@@ -108,23 +108,23 @@ jobs:
       - name: Render formula
         run: |
           version="${GITHUB_REF_NAME#v}"
-          sdist="dist/bdsc_cli-${version}.tar.gz"
+          sdist="dist/bdsc-${version}.tar.gz"
           sha256="$(sha256sum "$sdist" | awk '{print $1}')"
           python homebrew-tap/scripts/update_formula.py \
-            --formula homebrew-tap/Formula/bdsc-cli.rb \
-            --url "https://github.com/gumadeiras/bdsc-cli/releases/download/v${version}/bdsc_cli-${version}.tar.gz" \
+            --formula homebrew-tap/Formula/bdsc.rb \
+            --url "https://github.com/gumadeiras/bdsc-cli/releases/download/v${version}/bdsc-${version}.tar.gz" \
             --sha256 "$sha256"
 
       - name: Commit and push formula
         working-directory: homebrew-tap
         run: |
-          if git diff --quiet -- Formula/bdsc-cli.rb; then
-            echo "Formula/bdsc-cli.rb already up to date"
+          if git diff --quiet -- Formula/bdsc.rb; then
+            echo "Formula/bdsc.rb already up to date"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/bdsc-cli.rb
-          git commit -m "Update bdsc-cli to ${GITHUB_REF_NAME#v}"
+          git add Formula/bdsc.rb
+          git commit -m "Update bdsc to ${GITHUB_REF_NAME#v}"
           git push

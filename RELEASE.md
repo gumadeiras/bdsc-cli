@@ -1,6 +1,6 @@
 # RELEASE.md
 
-`bdsc-cli` release flow.
+`bdsc` release flow.
 
 ## Preconditions
 
@@ -40,26 +40,26 @@ pushes `main`, pushes `vX.Y.Z`, and waits for release CI.
 - Every release must update `CHANGELOG.md` before the release tag is created.
 - `CHANGELOG.md` must always keep an `Unreleased` section at the top for future entries.
 - New user-facing changes should be added to `Unreleased` as they land.
-- Use user-facing language whenever possible. Describe what changed for people using bdsc-cli, not repository maintenance.
+- Use user-facing language whenever possible. Describe what changed for people using bdsc, not repository maintenance.
 - Use these sections when they apply: `Features`, `Fixes`, and `Changes`.
 - Omit empty sections.
-- Do not include release chores unless the change affects how users install or use bdsc-cli.
+- Do not include release chores unless the change affects how users install or use bdsc.
 
 ## Homebrew
 
-The `homebrew-tap` release job updates `Formula/bdsc-cli.rb` automatically
+The `homebrew-tap` release job updates `Formula/bdsc.rb` automatically
 from the same sdist artifact used for the GitHub release.
 
 If the tap update fails or needs manual repair, use the published release asset,
 not a freshly built local sdist:
 
 ```bash
-curl -L -o /tmp/bdsc_cli-X.Y.Z.tar.gz \
-  https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc_cli-X.Y.Z.tar.gz
-sha256="$(shasum -a 256 /tmp/bdsc_cli-X.Y.Z.tar.gz | awk '{print $1}')"
+curl -L -o /tmp/bdsc-X.Y.Z.tar.gz \
+  https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc-X.Y.Z.tar.gz
+sha256="$(shasum -a 256 /tmp/bdsc-X.Y.Z.tar.gz | awk '{print $1}')"
 python ../homebrew-tap/scripts/update_formula.py \
-  --formula ../homebrew-tap/Formula/bdsc-cli.rb \
-  --url https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc_cli-X.Y.Z.tar.gz \
+  --formula ../homebrew-tap/Formula/bdsc.rb \
+  --url https://github.com/gumadeiras/bdsc-cli/releases/download/vX.Y.Z/bdsc-X.Y.Z.tar.gz \
   --sha256 "$sha256"
 ```
 

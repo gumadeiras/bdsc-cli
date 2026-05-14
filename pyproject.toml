@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bdsc-cli"
+name = "bdsc"
 dynamic = ["version"]
 description = "Sync and query BDSC datasets locally"
 readme = "README.md"

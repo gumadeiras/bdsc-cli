@@ -1,4 +1,4 @@
-# bdsc-cli
+# bdsc
 
 Small CLI for syncing public Bloomington Drosophila Stock Center datasets and
 querying them locally.
@@ -26,19 +26,19 @@ Another computer:
 
 ```bash
 brew tap gumadeiras/tap
-brew install bdsc-cli
+brew install bdsc
 ```
 
 PyPI with `pipx`:
 
 ```bash
-pipx install bdsc-cli
+pipx install bdsc
 ```
 
 PyPI with plain `pip`:
 
 ```bash
-python3 -m pip install bdsc-cli
+python3 -m pip install bdsc
 ```
 
 Source install:
