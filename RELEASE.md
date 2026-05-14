@@ -13,24 +13,19 @@
 ## Local Preflight
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[release]'
-python -m unittest discover -s tests
-python -m build
-python -m twine check dist/*
+./scripts/release check X.Y.Z
 ```
 
 ## Publish
 
-1. Commit release-ready changes.
-2. Push `main`.
-3. Create and push a tag like `vX.Y.Z`.
+Use the wrapper after explicit release approval:
 
 ```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
+./scripts/release run X.Y.Z
 ```
+
+The wrapper updates version files, runs the local preflight, commits, tags,
+pushes `main`, pushes `vX.Y.Z`, and waits for release CI.
 
 ## What Happens
 
