@@ -1,5 +1,8 @@
 # bdsc-cli
 
+> This package has been renamed. Install `bdsc` now:
+> `pipx install bdsc`
+
 Small CLI for syncing public Bloomington Drosophila Stock Center datasets and
 querying them locally.
 

@@ -4,6 +4,7 @@
 
 ### Changes
 
+- Added the final `bdsc-cli` release notice. Install `bdsc` now.
 - Updated release automation to the current GitHub Actions checkout, Python setup, and release actions.
 - Added a local release wrapper for version sync, package validation, tagging, and release workflow verification.
 
